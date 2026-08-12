@@ -1,0 +1,81 @@
+# Checks on every push, and a deploy when main moves.
+#
+# The two jobs are deliberately separate: `check` runs for every branch and
+# every pull request, while `deploy` needs it to pass and only fires for main.
+# That ordering is the whole point — a red test suite stops the live site from
+# being replaced, rather than being noticed afterwards.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  # So a deploy can be re-run by hand after fixing a Cloudflare-side problem,
+  # without having to invent an empty commit.
+  workflow_dispatch:
+
+# Two pushes in quick succession would otherwise race to deploy, and the loser
+# could land last and overwrite the newer build. Queue them per branch instead.
+# `cancel-in-progress` stays off for main so a deploy is never killed halfway.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  check:
+    name: Types and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Both versions come from files in the repo — `.node-version` and the
+      # `packageManager` field — so CI and a laptop cannot drift apart without
+      # the change being visible in a diff.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      # Frozen: install exactly the lockfile, and fail loudly if it is stale
+      # rather than quietly resolving something newer than what was tested.
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm typecheck
+
+      - run: pnpm test
+
+  deploy:
+    name: Deploy to Cloudflare
+    needs: check
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    # Named so GitHub shows the live URL against the run, and so branch
+    # protection or a required reviewer can be attached here later.
+    environment:
+      name: production
+      url: https://penfight.shawonmajid.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Builds the client into dist/, which wrangler.jsonc serves as the static
+      # assets. This re-runs typecheck; it is a few seconds and keeps the
+      # deployed artifact built by the same command used locally.
+      - run: pnpm build
+
+      # The repo's own pinned wrangler, not a separately versioned action, so
+      # the deploy uses the same version as `pnpm deploy` on a laptop.
+      - run: pnpm exec wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

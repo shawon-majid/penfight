@@ -43,6 +43,25 @@ Deploying needs a Cloudflare account (`npx wrangler login`). The free plan
 covers this comfortably — the game uses Workers and one SQLite-backed Durable
 Object per table.
 
+## Continuous integration
+
+`.github/workflows/ci.yml` type-checks and runs the tests on every push and
+pull request. When main passes, the same run builds and deploys to Cloudflare,
+so the live site follows main rather than whichever laptop last ran
+`pnpm deploy`.
+
+The deploy step reads two repository secrets:
+
+| Secret | What it is |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | A token with **Edit Cloudflare Workers** permission on the account, plus DNS edit on the `shawonmajid.com` zone, since `wrangler.jsonc` manages the custom domain. |
+| `CLOUDFLARE_ACCOUNT_ID` | The account the Worker belongs to. Wrangler can infer it for a single-account token, but setting it removes the ambiguity. |
+
+Node and pnpm versions are pinned in the repo — `.node-version` and the
+`packageManager` field — and CI reads both from there, so the versions used in
+a run and on a laptop cannot drift apart without the change showing up in a
+diff.
+
 ## How the code is laid out
 
 ```
