@@ -1,0 +1,17 @@
+# Which dependencies are allowed to run install scripts.
+#
+# pnpm blocks them by default, which is the right default — an install script is
+# arbitrary code from the registry. These three are the ones that genuinely need
+# it, so they are listed explicitly rather than the whole block being lifted.
+allowBuilds:
+  # Vite's bundler. Fetches its platform binary on install.
+  esbuild: true
+  # The Cloudflare Workers runtime, used by `pnpm dev:server`. Same reason.
+  workerd: true
+  # An image library pulled in transitively by wrangler. Nothing here uses it.
+  sharp: false
+
+# Hold new releases for a day before installing them. A compromised package is
+# usually caught and pulled within hours, so waiting removes most of the risk of
+# being the one who installs it.
+minimumReleaseAge: 1440

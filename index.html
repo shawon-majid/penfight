@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>Pen Fight</title>
+    <meta
+      name="description"
+      content="Flick your pen, knock everyone else off the table. Last pen standing wins."
+    />
+  </head>
+  <body>
+    <div id="app">
+      <div id="lobby"></div>
+      <div id="game" class="hidden">
+        <canvas id="table-canvas"></canvas>
+        <div id="hud"></div>
+      </div>
+    </div>
+    <script type="module" src="/src/client/main.ts"></script>
+  </body>
+</html>

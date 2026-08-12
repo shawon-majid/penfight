@@ -1,0 +1,550 @@
+/*
+ * Layout and chrome. The table itself is drawn on the canvas.
+ *
+ * Built for a phone first. Two things drive the mobile layout:
+ *
+ *   - The table is turned a quarter turn on a portrait screen (see
+ *     `render/theme.ts`), so it ends up tall and narrow with clear space above
+ *     and below. That space is where the heads-up display lives, which is why
+ *     it can sit over the canvas without ever covering the table.
+ *   - Everything you can tap is at least 44px, and the canvas swallows its own
+ *     gestures so a flick never scrolls the page or triggers zoom.
+ */
+
+:root {
+  --ink: #f2efe9;
+  --ink-dim: rgba(242, 239, 233, 0.58);
+  --surface: #1b1e25;
+  --surface-raised: #242832;
+  --line: rgba(242, 239, 233, 0.12);
+  --accent: #f0b429;
+  --danger: #ff6b6b;
+  --radius: 12px;
+  --font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --tap: 44px;
+
+  /* Keeps the display clear of notches and home indicators. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  /* dvh, not vh: iOS Safari's address bar slides away and vh does not notice. */
+  height: 100dvh;
+  background: #101216;
+  color: var(--ink);
+  font-family: var(--font);
+  overscroll-behavior: none; /* no pull-to-refresh mid-shot */
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  /* A flick is a drag; without this the browser tries to select text with it. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#app {
+  position: relative;
+  height: 100%;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ---------- Lobby ---------- */
+
+.lobby {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: calc(20px + var(--safe-top)) calc(16px + var(--safe-right))
+    calc(20px + var(--safe-bottom)) calc(16px + var(--safe-left));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  background: radial-gradient(circle at 50% 30%, #1d2129, #0c0e12 70%);
+}
+
+.lobby-card {
+  width: min(460px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 28px;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.55);
+}
+
+.lobby-card h1 {
+  margin: 0 0 6px;
+  font-size: clamp(28px, 8vw, 34px);
+  letter-spacing: -0.02em;
+}
+
+.tagline {
+  margin: 0 0 22px;
+  color: var(--ink-dim);
+  line-height: 1.5;
+}
+
+.lobby-card section {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.lobby-card h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+}
+
+.section-body {
+  margin: 0 0 14px;
+  color: var(--ink-dim);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.text-input {
+  width: 100%;
+  min-height: var(--tap);
+  padding: 12px 14px;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink);
+  font: inherit;
+  /* 16px or larger, or iOS zooms the whole page in when the field is focused. */
+  font-size: 16px;
+}
+
+.text-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+select.text-input {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ink-dim) 50%),
+    linear-gradient(135deg, var(--ink-dim) 50%, transparent 50%);
+  background-position: calc(100% - 20px) 50%, calc(100% - 15px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 36px;
+}
+
+.code-input {
+  text-transform: uppercase;
+  letter-spacing: 0.28em;
+  font-weight: 600;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.row > .text-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.primary-button,
+.secondary-button,
+.ghost-button {
+  min-height: var(--tap);
+  padding: 12px 18px;
+  border-radius: var(--radius);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  touch-action: manipulation; /* no 300ms double-tap delay */
+}
+
+.primary-button {
+  width: 100%;
+  background: var(--accent);
+  color: #221a05;
+}
+
+.row .primary-button,
+.row .secondary-button {
+  width: auto;
+  flex: 0 0 auto;
+}
+
+.secondary-button {
+  background: var(--surface-raised);
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.ghost-button {
+  min-height: var(--tap);
+  padding: 8px 14px;
+  background: transparent;
+  border-color: var(--line);
+  color: var(--ink-dim);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+@media (hover: hover) {
+  .primary-button:hover,
+  .secondary-button:hover,
+  .ghost-button:hover {
+    filter: brightness(1.12);
+  }
+}
+
+.primary-button:active,
+.secondary-button:active,
+.ghost-button:active {
+  filter: brightness(0.92);
+}
+
+.error {
+  margin: 14px 0 0;
+  min-height: 20px;
+  color: var(--danger);
+  font-size: 14px;
+}
+
+.how-to {
+  margin-top: 18px;
+  color: var(--ink-dim);
+  font-size: 14px;
+}
+
+.how-to summary {
+  cursor: pointer;
+  /* Padding rather than flex, so the disclosure triangle survives and the row
+     is still a comfortable tap target. */
+  padding: 11px 0;
+}
+
+.how-to ul {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  line-height: 1.6;
+}
+
+/* ---------- Game ---------- */
+
+#game {
+  position: absolute;
+  inset: 0;
+}
+
+#table-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  /* The flick gesture is ours: no scrolling, no pinch-zoom, no double-tap. */
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none; /* taps fall through to the table by default */
+  padding: calc(12px + var(--safe-top)) calc(14px + var(--safe-right))
+    calc(12px + var(--safe-bottom)) calc(14px + var(--safe-left));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hud button {
+  pointer-events: auto;
+}
+
+.hud-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+
+.table-code {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink-dim);
+  min-width: 0;
+}
+
+.table-code strong {
+  color: var(--ink);
+  font-size: 17px;
+  letter-spacing: 0.22em;
+}
+
+.turn-banner {
+  flex: 1;
+  text-align: center;
+  font-size: 17px;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.player {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(12, 14, 18, 0.55);
+  font-size: 13px;
+  border: 1px solid transparent;
+  max-width: 100%;
+}
+
+.player.is-turn {
+  border-color: var(--line);
+  background: rgba(12, 14, 18, 0.85);
+}
+
+.player.is-out {
+  opacity: 0.4;
+}
+
+.player.is-out .player-name {
+  text-decoration: line-through;
+}
+
+.player-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.swatch {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.player-status {
+  color: var(--ink-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* Pushes the hint and notice to the bottom without absolute positioning, so
+   they can never land underneath a notch or a home indicator. */
+.hint,
+.notice {
+  margin: 0 auto;
+  max-width: min(560px, 100%);
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.5;
+  flex: 0 0 auto;
+}
+
+.hint {
+  margin-top: auto;
+  color: var(--ink-dim);
+}
+
+.notice {
+  margin-top: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(255, 107, 107, 0.14);
+  border: 1px solid rgba(255, 107, 107, 0.3);
+  color: #ffc2c2;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(8, 9, 12, 0.66);
+  backdrop-filter: blur(3px);
+  pointer-events: auto;
+}
+
+.overlay-card {
+  width: min(380px, 100%);
+  padding: 28px;
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+}
+
+.overlay-card h2 {
+  margin: 0 0 8px;
+  font-size: clamp(22px, 6vw, 26px);
+}
+
+.overlay-card p {
+  margin: 0 0 20px;
+  color: var(--ink-dim);
+  line-height: 1.5;
+}
+
+/* ---------- Phones ---------- */
+
+@media (max-width: 720px) {
+  .lobby-card {
+    padding: 22px 18px;
+  }
+
+  .hud-top {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  .table-code strong {
+    font-size: 15px;
+    letter-spacing: 0.16em;
+  }
+
+  /* The turn banner takes the full second row so a long name still fits. */
+  .turn-banner {
+    order: 3;
+    flex-basis: 100%;
+    font-size: 15px;
+  }
+
+  /* Player chips run across the top rather than down the side: on a portrait
+     screen the table is tall, and a vertical list would run into it. */
+  .player-list {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
+  .player {
+    padding: 4px 9px;
+    font-size: 12px;
+  }
+
+  .hint {
+    font-size: 12px;
+  }
+}
+
+/* ---------- Short screens (a phone held sideways on the lobby) ---------- */
+
+@media (max-height: 540px) {
+  .lobby-card {
+    padding: 18px;
+  }
+
+  .lobby-card h1 {
+    font-size: 24px;
+    margin-bottom: 2px;
+  }
+
+  .tagline {
+    margin-bottom: 14px;
+    font-size: 13px;
+  }
+
+  .lobby-card section {
+    margin-top: 14px;
+    padding-top: 13px;
+  }
+
+  .section-body {
+    margin-bottom: 10px;
+    font-size: 13px;
+  }
+
+  .error {
+    margin-top: 8px;
+    min-height: 0;
+  }
+
+  .how-to {
+    margin-top: 8px;
+  }
+}
+
+/* ---------- Phones held sideways ---------- */
+
+@media (max-height: 460px) and (orientation: landscape) {
+  /* Vertical space is the scarce thing here, so the display gets out of the
+     way: chips shrink and the coaching hint goes, since anyone playing in
+     landscape has already had it on the lobby screen. */
+  .hud {
+    padding: calc(8px + var(--safe-top)) calc(12px + var(--safe-right))
+      calc(8px + var(--safe-bottom)) calc(12px + var(--safe-left));
+    gap: 4px;
+  }
+
+  .hint {
+    display: none;
+  }
+
+  /* Held sideways the table is limited by height, which leaves spare width at
+     the sides — so the player list goes back to a column and tucks into that
+     margin instead of sitting on the table. */
+  .player-list {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 4px;
+    max-width: 40vw;
+  }
+
+  .player {
+    padding: 3px 8px;
+    font-size: 11px;
+  }
+
+  .overlay-card {
+    padding: 18px;
+  }
+
+  .overlay-card p {
+    margin-bottom: 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay {
+    backdrop-filter: none;
+  }
+}

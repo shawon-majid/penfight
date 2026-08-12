@@ -1,0 +1,56 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "penfight",
+  "main": "src/server/worker.ts",
+  "compatibility_date": "2025-01-15",
+
+  // The address people actually type. Declaring it here rather than clicking
+  // through the dashboard means the DNS record and the certificate are part of
+  // the deploy: `wrangler deploy` creates them if they are missing, and the
+  // repo stays the single description of where this thing lives.
+  //
+  // The zone (shawonmajid.com) has to already be on this Cloudflare account.
+  "routes": [
+    {
+      "pattern": "penfight.shawonmajid.com",
+      "custom_domain": true
+    }
+  ],
+
+  // Adding a route turns the workers.dev address off by default. Kept on so
+  // the original penfight.penfight.workers.dev link stays alive alongside the
+  // real one — old links that have already been shared keep working. Set this
+  // to false if you would rather have a single canonical address.
+  "workers_dev": true,
+
+  // The built client. Anything that is not a file here falls through to the
+  // Worker, which is how /api/* reaches the code in src/server.
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+
+  // One object per table code. `idFromName(code)` always resolves to the same
+  // one, anywhere in the world, which is what makes join codes work.
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "TABLE_ROOM",
+        "class_name": "TableRoom"
+      }
+    ]
+  },
+
+  // SQLite-backed Durable Objects are the ones available on the free plan.
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["TableRoom"]
+    }
+  ],
+
+  "observability": {
+    "enabled": true
+  }
+}
