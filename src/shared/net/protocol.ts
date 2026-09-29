@@ -25,7 +25,7 @@ import { createWorld, type World } from '../physics/world';
 import type { Match, MatchPhase, Player } from '../game/match';
 import type { Strike } from '../game/strike';
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 // ---------------------------------------------------------------------------
 // Snapshots
@@ -55,6 +55,9 @@ export interface MatchSnapshot {
   winnerId: string | null;
   /** Wall-clock ms after which the current player forfeits their turn. */
   turnEndsAt: number | null;
+  openingTurnsLeft: number;
+  openingEndedOnTurn: number | null;
+  returnedToStart: string[];
 }
 
 export function snapshotPen(pen: Pen): PenSnapshot {
@@ -83,6 +86,9 @@ export function snapshotMatch(match: Match, turnEndsAt: number | null = null): M
     turnNumber: match.turnNumber,
     winnerId: match.winnerId,
     turnEndsAt,
+    openingTurnsLeft: match.openingTurnsLeft,
+    openingEndedOnTurn: match.openingEndedOnTurn,
+    returnedToStart: [...match.returnedToStart],
   };
 }
 
@@ -116,11 +122,17 @@ export function restoreMatch(snapshot: MatchSnapshot, tuning: Tuning = DEFAULT_T
   return {
     code: snapshot.code,
     phase: snapshot.phase,
-    players: snapshot.players.map((player) => ({ ...player })),
+    // `outOnTurn` is missing from tables saved by an older server.
+    players: snapshot.players.map((player) => ({ ...player, outOnTurn: player.outOnTurn ?? null })),
     world,
     turnIndex: snapshot.turnIndex,
     turnNumber: snapshot.turnNumber,
     winnerId: snapshot.winnerId,
+    // A table saved by an older server has none of these. Its match was
+    // already under way, so treat the opening round as over.
+    openingTurnsLeft: snapshot.openingTurnsLeft ?? 0,
+    openingEndedOnTurn: snapshot.openingEndedOnTurn ?? null,
+    returnedToStart: [...(snapshot.returnedToStart ?? [])],
   };
 }
 
@@ -136,6 +148,9 @@ export function applySnapshot(match: Match, snapshot: MatchSnapshot): void {
   match.turnIndex = restored.turnIndex;
   match.turnNumber = restored.turnNumber;
   match.winnerId = restored.winnerId;
+  match.openingTurnsLeft = restored.openingTurnsLeft;
+  match.openingEndedOnTurn = restored.openingEndedOnTurn;
+  match.returnedToStart = restored.returnedToStart;
 }
 
 // ---------------------------------------------------------------------------
@@ -151,12 +166,22 @@ export type ClientMessage =
   | { type: 'rematch' }
   | { type: 'ping' };
 
+/** Games won at this table so far, by player id. Outlives any one match. */
+export type WinTally = Record<string, number>;
+
 /** Table -> browser. */
 export type ServerMessage =
   /** Sent once on connect: who you are, and the state of the table. */
-  | { type: 'welcome'; playerId: string; hostId: string; snapshot: MatchSnapshot; version: number }
+  | {
+      type: 'welcome';
+      playerId: string;
+      hostId: string;
+      snapshot: MatchSnapshot;
+      wins: WinTally;
+      version: number;
+    }
   /** Full authoritative state. Snap to this. */
-  | { type: 'snapshot'; snapshot: MatchSnapshot; hostId: string }
+  | { type: 'snapshot'; snapshot: MatchSnapshot; hostId: string; wins: WinTally }
   /** Somebody flicked. Replay it locally and animate. */
   | { type: 'strike'; playerId: string; strike: Strike; turnNumber: number }
   /** A turn was passed over without a shot. */

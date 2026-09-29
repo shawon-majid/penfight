@@ -20,7 +20,7 @@ import type { Vec2 } from '../physics/vec2';
 import { normalize, scale, sub, vec } from '../physics/vec2';
 import { cloneWorld, findPen, simulateUntilSettled, SIM_HZ } from '../physics/world';
 import type { Match } from './match';
-import { playerById } from './match';
+import { inOpeningRound, playerById } from './match';
 import type { Rng } from './rng';
 import type { Strike } from './strike';
 import { applyStrike } from './strike';
@@ -178,7 +178,8 @@ function rotate(v: Vec2, radians: number): Vec2 {
  *
  * Knocking someone off is worth far more than nudging them, and putting your
  * own pen off the table is a disaster — which is exactly the shape of the real
- * decision.
+ * decision. In the opening round knocking someone off earns nothing, since
+ * their pen is put back, so bots play for position instead.
  *
  * Exported because it is the interesting half of the bot: swap this function
  * and you have a different personality (a spoiler that only defends, a bully
@@ -197,6 +198,7 @@ export function rateStrike(
   simulateUntilSettled(after, LOOKAHEAD_FRAMES);
 
   let score = 0;
+  const opening = inOpeningRound(match);
 
   for (const penBefore of before.pens) {
     if (penBefore.state !== 'onTable') continue;
@@ -207,7 +209,10 @@ export function rateStrike(
     const wentOff = penAfter.state !== 'onTable';
 
     if (wentOff) {
-      score += mine ? -1000 * profile.caution : 100;
+      // In the opening round anyone else's pen is put back on its starting
+      // spot, so sending it off is worth nothing. Your own still knocks you out.
+      if (mine) score -= 1000 * profile.caution;
+      else if (!opening) score += 100;
       continue;
     }
 

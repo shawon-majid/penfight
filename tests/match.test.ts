@@ -121,6 +121,8 @@ describe('knocking pens off', () => {
       { id: 'a', name: 'Ann' },
       { id: 'b', name: 'Ben' },
     ]);
+    // Past the opening round, where knock-outs count. (opening.test.ts covers it.)
+    match.openingTurnsLeft = 0;
 
     // Put Ben's pen on the brink and shove it over.
     const bensPen = findPen(match.world, penIdFor('b'))!;
@@ -144,6 +146,7 @@ describe('knocking pens off', () => {
       { id: 'a', name: 'Ann' },
       { id: 'b', name: 'Ben' },
     ]);
+    match.openingTurnsLeft = 0;
 
     submitStrike(match, 'a', gentle('a'));
     for (const pen of match.world.pens) {

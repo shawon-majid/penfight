@@ -384,6 +384,22 @@ select.text-input {
   color: var(--ink-dim);
 }
 
+/* The opening-round rule. Sits just above the hint and takes over its job of
+   pushing the bottom group down. */
+.round-note {
+  margin: auto auto 0;
+  max-width: min(560px, 100%);
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.5;
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.round-note:not(.hidden) + .hint {
+  margin-top: 4px;
+}
+
 .notice {
   margin-top: 8px;
   padding: 8px 14px;
@@ -424,6 +440,64 @@ select.text-input {
   line-height: 1.5;
 }
 
+/* The roster in the lobby, the standings at the end. */
+.overlay-list {
+  list-style: none;
+  margin: 14px 0 20px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 40dvh;
+  overflow-y: auto;
+  text-align: left;
+}
+
+.overlay-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--surface-raised);
+  font-size: 15px;
+}
+
+.overlay-row.is-you {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.overlay-place {
+  flex: 0 0 2.4em;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.overlay-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overlay-detail {
+  flex: 0 0 auto;
+  color: var(--ink-dim);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.overlay-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.overlay-actions .secondary-button {
+  width: 100%;
+}
+
 /* ---------- Phones ---------- */
 
 @media (max-width: 720px) {
@@ -461,7 +535,8 @@ select.text-input {
     font-size: 12px;
   }
 
-  .hint {
+  .hint,
+  .round-note {
     font-size: 12px;
   }
 }

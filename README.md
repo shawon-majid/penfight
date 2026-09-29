@@ -6,6 +6,11 @@ Up to ten people on one table, joined with a five-character code, taking it in
 turns. On your own, you play four-handed against three bots. Plays on a phone
 as well as a laptop.
 
+Who goes first is drawn at random, then play goes round the table. The first
+lap is an **opening round**: a pen knocked off by somebody else's shot is put
+back on its starting spot, so everyone gets at least one go before anyone can
+be knocked out. Sending your *own* pen off still knocks you out, even then.
+
 The interesting part is the physics. A pen is not a ball — it is a long thing
 with an orientation, so *where* you hit it matters as much as how hard. Grab it
 through the middle and it slides straight. Grab a tip and the same flick puts
@@ -188,8 +193,9 @@ without touching the search around it.
 ## Balance
 
 `tests/balance.test.ts` plays a few hundred bot matches and checks the game is
-actually a game. As tuned, four-player bot matches run about **7 turns** on
-average (3 to 18), and draws — everybody falling off together — are under 15%.
+actually a game. As tuned, four-player bot matches run about **16 turns** on
+average (8 to 33), four of them being the opening round, and draws — everybody
+falling off together — are rare.
 
 Two relationships hold the tuning together, and the tests enforce them:
 
@@ -207,12 +213,14 @@ will tell you what it did to the game.
 pnpm test
 ```
 
-96 tests over `src/shared` and the pure maths in `client/render/theme.ts`: the
+121 tests over `src/shared` and the pure maths in `client/render/theme.ts`: the
 closest-approach maths including its degenerate
 cases, momentum conservation through a hit, friction matching `v²/2μg`, spin
 transfer, pens never tunnelling through each other at full speed, turn order
-and elimination, snapshot round-trips, and the balance checks above. There is
-no DOM and no network in any of it, which is the point of the layering.
+and elimination, the random first player and the opening round, final
+standings and the win tally, snapshot round-trips, and the balance checks
+above. There is no DOM and no network in any of it, which is the point of the
+layering.
 
 ## Ideas worth adding
 

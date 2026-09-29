@@ -15,7 +15,7 @@ import type { Match } from '../../shared/game/match';
 import { createMatch, skipTurn, submitStrike } from '../../shared/game/match';
 import type { Strike } from '../../shared/game/strike';
 import { stepMatch } from '../../shared/game/match';
-import type { ServerMessage } from '../../shared/net/protocol';
+import type { ServerMessage, WinTally } from '../../shared/net/protocol';
 import { applySnapshot } from '../../shared/net/protocol';
 import { PROTOCOL_VERSION } from '../../shared/net/protocol';
 import { RoomClient, localPlayerId, type ConnectionStatus } from '../net/room-client';
@@ -31,6 +31,7 @@ export class OnlineSession implements Session {
   youAre: string;
   hostId: string | null = null;
   notice: string | null = 'Connecting…';
+  wins: WinTally = {};
   /** Wall-clock ms by which the current player must shoot, if the server set one. */
   turnEndsAt: number | null = null;
 
@@ -122,6 +123,7 @@ export class OnlineSession implements Session {
         }
         this.youAre = message.playerId;
         this.hostId = message.hostId;
+        this.wins = message.wins ?? {};
         applySnapshot(this.match, message.snapshot);
         this.turnEndsAt = message.snapshot.turnEndsAt;
         this.notice = null;
@@ -130,6 +132,7 @@ export class OnlineSession implements Session {
 
       case 'snapshot': {
         this.hostId = message.hostId;
+        this.wins = message.wins ?? {};
         applySnapshot(this.match, message.snapshot);
         this.turnEndsAt = message.snapshot.turnEndsAt;
         // Everything before this point is settled; forget the echo bookkeeping.

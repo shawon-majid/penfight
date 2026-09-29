@@ -27,6 +27,7 @@ import {
   createMatch,
   currentPlayer,
   playerById,
+  randomFirstTurn,
   setConnected,
   skipTurn,
   stepMatch,
@@ -34,8 +35,16 @@ import {
   type Match,
   type PlayerSpec,
 } from '../shared/game/match';
+import { cryptoRandomInt } from '../shared/game/rng';
+import { DEFAULT_TABLE } from '../shared/physics/table';
+import { DEFAULT_TUNING } from '../shared/physics/tuning';
 import { SIM_HZ } from '../shared/physics/world';
-import type { ClientMessage, MatchSnapshot, ServerMessage } from '../shared/net/protocol';
+import type {
+  ClientMessage,
+  MatchSnapshot,
+  ServerMessage,
+  WinTally,
+} from '../shared/net/protocol';
 import {
   PROTOCOL_VERSION,
   decodeClientMessage,
@@ -69,6 +78,8 @@ export class TableRoom implements DurableObject {
   /** The live match, or null while the table is still filling up. */
   private match: Match | null = null;
   private hostId: string | null = null;
+  /** Games won at this table, by player id. Kept across rematches. */
+  private wins: WinTally = {};
   private turnEndsAt: number | null = null;
   private turnTimer: ReturnType<typeof setTimeout> | null = null;
   private settleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -131,6 +142,7 @@ export class TableRoom implements DurableObject {
       playerId,
       hostId: this.hostId ?? playerId,
       snapshot: this.snapshot(),
+      wins: { ...this.wins },
       version: PROTOCOL_VERSION,
     });
     this.broadcastSnapshot();
@@ -222,7 +234,7 @@ export class TableRoom implements DurableObject {
       return;
     }
 
-    this.match = createMatch(this.code, this.rosterSpecs());
+    this.match = this.dealMatch();
     this.armTurnTimer();
     this.broadcastSnapshot();
     this.persist();
@@ -240,11 +252,18 @@ export class TableRoom implements DurableObject {
       if (seat.sockets.size === 0) this.seats.delete(id);
     }
     this.clearTimers();
-    this.match =
-      this.seats.size >= MIN_PLAYERS ? createMatch(this.code, this.rosterSpecs()) : null;
+    this.match = this.seats.size >= MIN_PLAYERS ? this.dealMatch() : null;
     if (this.match) this.armTurnTimer();
     this.broadcastSnapshot();
     this.persist();
+  }
+
+  /** A fresh match for everyone seated, with a first player nobody can predict. */
+  private dealMatch(): Match {
+    const specs = this.rosterSpecs();
+    return createMatch(this.code, specs, DEFAULT_TABLE, DEFAULT_TUNING, {
+      firstTurnIndex: randomFirstTurn(specs.length, cryptoRandomInt),
+    });
   }
 
   /**
@@ -262,7 +281,7 @@ export class TableRoom implements DurableObject {
     if (!result.ok) {
       this.sendTo(socket, { type: 'error', message: describeRejection(result.reason) });
       // Put them back in step with the truth.
-      this.sendTo(socket, { type: 'snapshot', snapshot: this.snapshot(), hostId: this.hostId ?? '' });
+      this.sendTo(socket, this.snapshotMessage());
       return;
     }
 
@@ -277,6 +296,12 @@ export class TableRoom implements DurableObject {
       const step = stepMatch(match);
       frames++;
       if (step.settled) break;
+    }
+
+    // A shot is the only thing that can end a match, so this is the one place
+    // a win is counted.
+    if (match.phase === 'finished' && match.winnerId) {
+      this.wins[match.winnerId] = (this.wins[match.winnerId] ?? 0) + 1;
     }
 
     const animationMs = (frames / SIM_HZ) * 1000 + SETTLE_BUFFER_MS;
@@ -353,8 +378,17 @@ export class TableRoom implements DurableObject {
     return snapshotMatch(preview, null);
   }
 
+  private snapshotMessage(): ServerMessage {
+    return {
+      type: 'snapshot',
+      snapshot: this.snapshot(),
+      hostId: this.hostId ?? '',
+      wins: { ...this.wins },
+    };
+  }
+
   private broadcastSnapshot(): void {
-    this.broadcast({ type: 'snapshot', snapshot: this.snapshot(), hostId: this.hostId ?? '' });
+    this.broadcast(this.snapshotMessage());
   }
 
   private broadcast(message: ServerMessage): void {
@@ -384,6 +418,7 @@ export class TableRoom implements DurableObject {
       hostId: this.hostId,
       roster: this.rosterSpecs(),
       snapshot: this.match ? snapshotMatch(this.match, null) : null,
+      wins: this.wins,
     };
     void this.state.storage.put('table', payload);
   }
@@ -391,6 +426,7 @@ export class TableRoom implements DurableObject {
   private restore(saved: PersistedTable): void {
     this.code = saved.code;
     this.hostId = saved.hostId;
+    this.wins = { ...(saved.wins ?? {}) };
     this.seats = new Map(
       saved.roster.map((spec) => [spec.id, { spec, sockets: new Set<WebSocket>() }]),
     );
@@ -408,6 +444,8 @@ interface PersistedTable {
   hostId: string | null;
   roster: PlayerSpec[];
   snapshot: MatchSnapshot | null;
+  /** Missing from tables saved before wins were counted. */
+  wins?: WinTally;
 }
 
 function describeRejection(reason: string): string {

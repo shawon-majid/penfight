@@ -31,6 +31,8 @@ describe('bot shot selection', () => {
 
   it('rates an easy kill highly', () => {
     const match = duel();
+    // A kill only counts once the opening round is over (see opening.test.ts).
+    match.openingTurnsLeft = 0;
     // Park the human's pen right on the lip of the table, in front of the bot.
     const target = findPen(match.world, penIdFor('human'))!;
     const shooter = findPen(match.world, penIdFor('bot'))!;

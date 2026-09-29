@@ -8,16 +8,20 @@
 
 import type { BotDifficulty } from '../../shared/game/bots';
 import { chooseBotStrike } from '../../shared/game/bots';
-import type { Match, PlayerSpec } from '../../shared/game/match';
+import type { Match, MatchPhase, PlayerSpec } from '../../shared/game/match';
 import {
   createMatch,
   currentPlayer,
+  randomFirstTurn,
   skipTurn,
   stepMatch,
   submitStrike,
 } from '../../shared/game/match';
 import { createRng, seedFromString, type Rng } from '../../shared/game/rng';
+import { DEFAULT_TABLE } from '../../shared/physics/table';
+import { DEFAULT_TUNING } from '../../shared/physics/tuning';
 import type { Strike } from '../../shared/game/strike';
+import type { WinTally } from '../../shared/net/protocol';
 import { ChangeEmitter, NO_EVENTS, type FrameEvents, type Session } from './session';
 
 /** A beat before a bot shoots, so a human can see whose turn it was. */
@@ -40,6 +44,8 @@ export class SoloSession implements Session {
   readonly youAre = YOU;
   notice: string | null = null;
   match: Match;
+  /** Wins across rematches in this sitting. Gone when you leave the table. */
+  readonly wins: WinTally = {};
 
   private readonly emitter = new ChangeEmitter();
   private readonly options: SoloOptions;
@@ -59,7 +65,10 @@ export class SoloSession implements Session {
     for (let i = 0; i < this.options.botCount; i++) {
       specs.push({ id: `bot-${i}`, name: BOT_NAMES[i % BOT_NAMES.length], isBot: true });
     }
-    return createMatch('SOLO', specs);
+    // Drawn from the session's seeded generator, so a fixed seed still
+    // replays an identical match, first player included.
+    const firstTurnIndex = randomFirstTurn(specs.length, (n) => Math.floor(this.rng.next() * n));
+    return createMatch('SOLO', specs, DEFAULT_TABLE, DEFAULT_TUNING, { firstTurnIndex });
   }
 
   tick(): FrameEvents {
@@ -67,6 +76,12 @@ export class SoloSession implements Session {
 
     if (this.match.phase === 'resolving') {
       const result = stepMatch(this.match);
+      // Widened by hand: TypeScript does not know stepMatch can end the match.
+      const phase = this.match.phase as MatchPhase;
+      const { winnerId } = this.match;
+      if (result.turnEnded && phase === 'finished' && winnerId) {
+        this.wins[winnerId] = (this.wins[winnerId] ?? 0) + 1;
+      }
       if (result.turnEnded || result.eliminated.length > 0) this.emitter.emit();
       return result;
     }

@@ -6,7 +6,7 @@
  */
 
 import type { Match, Player } from '../../shared/game/match';
-import { currentPlayer } from '../../shared/game/match';
+import { currentPlayer, inOpeningRound, playerById, standings } from '../../shared/game/match';
 import { colourFor, type ViewportInsets } from '../render/theme';
 import type { Session } from '../modes/session';
 import { strikeablePen } from '../modes/session';
@@ -27,10 +27,15 @@ export class Hud {
   private readonly noticeBar = document.createElement('div');
   private readonly playerList = document.createElement('ul');
   private readonly hint = document.createElement('div');
+  /** The opening-round rule, and which pens it just saved. */
+  private readonly roundNote = document.createElement('div');
   private readonly overlay = document.createElement('div');
   private readonly overlayTitle = document.createElement('h2');
   private readonly overlayBody = document.createElement('p');
   private readonly overlayAction = document.createElement('button');
+  /** The roster in the lobby, the standings at the end. */
+  private readonly overlayList = document.createElement('ol');
+  private readonly overlayLeave = document.createElement('button');
   private readonly leaveButton = document.createElement('button');
 
   private lastCopiedCode: string | null = null;
@@ -75,6 +80,8 @@ export class Hud {
     this.playerList.className = 'player-list';
     this.noticeBar.className = 'notice';
     this.hint.className = 'hint';
+    this.roundNote.className = 'round-note';
+    this.roundNote.setAttribute('aria-live', 'polite');
 
     this.overlay.className = 'overlay hidden';
     this.overlayAction.type = 'button';
@@ -82,12 +89,28 @@ export class Hud {
     this.overlayAction.addEventListener('click', () => this.overlayAction.dataset.action === 'start'
       ? this.callbacks.onStart?.()
       : this.callbacks.onRematch());
+    this.overlayLeave.type = 'button';
+    this.overlayLeave.className = 'secondary-button';
+    this.overlayLeave.addEventListener('click', () => this.callbacks.onLeave());
+    this.overlayList.className = 'overlay-list';
+
+    const overlayActions = document.createElement('div');
+    overlayActions.className = 'overlay-actions';
+    overlayActions.append(this.overlayAction, this.overlayLeave);
+
     const overlayCard = document.createElement('div');
     overlayCard.className = 'overlay-card';
-    overlayCard.append(this.overlayTitle, this.overlayBody, this.overlayAction);
+    overlayCard.append(this.overlayTitle, this.overlayList, this.overlayBody, overlayActions);
     this.overlay.append(overlayCard);
 
-    this.root.append(top, this.playerList, this.hint, this.noticeBar, this.overlay);
+    this.root.append(
+      top,
+      this.playerList,
+      this.roundNote,
+      this.hint,
+      this.noticeBar,
+      this.overlay,
+    );
   }
 
   /**
@@ -121,8 +144,9 @@ export class Hud {
       }
     }
 
-    // Whichever of the hint and the notice is showing sits at the bottom.
-    const bottomEdges = [this.hint, this.noticeBar]
+    // Whichever of the round note, the hint and the notice is showing sits at
+    // the bottom.
+    const bottomEdges = [this.roundNote, this.hint, this.noticeBar]
       .filter((element) => element.textContent && element.offsetParent !== null)
       .map((element) => element.getBoundingClientRect().top);
     const bottom = bottomEdges.length
@@ -139,6 +163,7 @@ export class Hud {
 
     this.renderPlayers(match, session.youAre);
     this.renderTurn(session);
+    this.renderRoundNote(match);
     this.renderNotice(session);
     this.renderOverlay(session);
   }
@@ -150,7 +175,8 @@ export class Hud {
       const item = document.createElement('li');
       item.className = 'player';
       if (player.eliminated) item.classList.add('is-out');
-      if (index === match.turnIndex && match.phase !== 'finished') {
+      const inPlay = match.phase === 'aiming' || match.phase === 'resolving';
+      if (index === match.turnIndex && inPlay) {
         item.classList.add('is-turn');
       }
 
@@ -195,6 +221,9 @@ export class Hud {
     const yours = player.id === session.youAre;
     if (match.phase === 'resolving') {
       this.turnBanner.textContent = 'Pens are moving…';
+    } else if (match.turnNumber === 0) {
+      // The first player is drawn at random; say so, or it looks like a bug.
+      this.turnBanner.textContent = yours ? 'You go first' : `${player.name} goes first`;
     } else {
       this.turnBanner.textContent = yours ? 'Your turn' : `${player.name} is aiming`;
     }
@@ -205,6 +234,36 @@ export class Hud {
     this.hint.textContent = strikeablePen(session) ? this.gestureHint : '';
   }
 
+  private renderRoundNote(match: Match): void {
+    const lines: string[] = [];
+    const inPlay = match.phase === 'aiming' || match.phase === 'resolving';
+
+    if (inPlay && match.returnedToStart.length > 0 && match.phase === 'aiming') {
+      const names = match.returnedToStart
+        .map((id) => playerById(match, id)?.name)
+        .filter((name): name is string => Boolean(name));
+      if (names.length > 0) {
+        lines.push(
+          names.length === 1
+            ? `${names[0]}'s pen went back to its start.`
+            : `${names.join(', ')}'s pens went back to their starts.`,
+        );
+      }
+    }
+
+    if (inPlay && inOpeningRound(match)) {
+      lines.push(
+        'Opening round: a pen knocked off by someone else goes back to its start. ' +
+          'Knock yourself off and you are out.',
+      );
+    } else if (match.phase === 'aiming' && match.openingEndedOnTurn === match.turnNumber) {
+      lines.push('Opening round over. Every knock-out counts from now on.');
+    }
+
+    this.roundNote.textContent = lines.join(' ');
+    this.roundNote.classList.toggle('hidden', lines.length === 0);
+  }
+
   private renderNotice(session: Session): void {
     this.noticeBar.textContent = session.notice ?? '';
     this.noticeBar.classList.toggle('hidden', !session.notice);
@@ -213,17 +272,24 @@ export class Hud {
   private renderOverlay(session: Session): void {
     const { match } = session;
     const isHost = session.hostId !== null && session.hostId === session.youAre;
+    const host = session.hostId ? playerById(match, session.hostId) : undefined;
+    const hostName = host?.name ?? 'the host';
+    this.overlayLeave.textContent = match.code === 'SOLO' ? 'Back to menu' : 'Leave table';
 
     if (match.phase === 'lobby') {
       this.overlay.classList.remove('hidden');
       this.overlayTitle.textContent = `Table ${match.code}`;
+      this.renderRoster(match, session);
       this.overlayBody.textContent =
         match.players.length < 2
           ? 'Share the code and wait for someone to join.'
-          : `${match.players.length} players ready.`;
+          : isHost
+            ? `${match.players.length} players ready.`
+            : `Waiting for ${hostName} to start the game.`;
       this.overlayAction.dataset.action = 'start';
       this.overlayAction.textContent = 'Start the game';
       this.overlayAction.hidden = !isHost || match.players.length < 2;
+      this.overlayBody.hidden = !this.overlayBody.textContent;
       return;
     }
 
@@ -235,16 +301,74 @@ export class Hud {
           ? 'You win'
           : `${winner.name} wins`
         : 'Everybody fell off';
-      this.overlayBody.textContent = winner
-        ? 'Last pen standing.'
-        : 'Nobody left on the table. Call it a draw.';
+      this.renderStandings(match, session);
+      this.overlayBody.textContent = isHost
+        ? winner
+          ? ''
+          : 'Nobody left on the table. Call it a draw.'
+        : `Waiting for ${hostName} to start the next game.`;
       this.overlayAction.dataset.action = 'rematch';
       this.overlayAction.textContent = 'Play again';
       this.overlayAction.hidden = !isHost;
+      this.overlayBody.hidden = !this.overlayBody.textContent;
       return;
     }
 
     this.overlay.classList.add('hidden');
+  }
+
+  /** Who is at the table, before the game starts. */
+  private renderRoster(match: Match, session: Session): void {
+    this.overlayList.replaceChildren(
+      ...match.players.map((player) => {
+        const tags: string[] = [];
+        if (player.id === session.hostId) tags.push('host');
+        return this.overlayRow(player, session, null, tags.join(' · '));
+      }),
+    );
+  }
+
+  /** Final places, with each player's wins at this table. */
+  private renderStandings(match: Match, session: Session): void {
+    this.overlayList.replaceChildren(
+      ...standings(match).map(({ player, place }) => {
+        const wins = session.wins[player.id] ?? 0;
+        return this.overlayRow(player, session, ordinal(place), `${wins} ${wins === 1 ? 'win' : 'wins'}`);
+      }),
+    );
+  }
+
+  private overlayRow(
+    player: Player,
+    session: Session,
+    place: string | null,
+    detail: string,
+  ): HTMLLIElement {
+    const row = document.createElement('li');
+    row.className = 'overlay-row';
+    if (player.id === session.youAre) row.classList.add('is-you');
+
+    if (place) {
+      const placeLabel = document.createElement('span');
+      placeLabel.className = 'overlay-place';
+      placeLabel.textContent = place;
+      row.append(placeLabel);
+    }
+
+    const swatch = document.createElement('span');
+    swatch.className = 'swatch';
+    swatch.style.background = colourFor(player.colourIndex).body;
+
+    const name = document.createElement('span');
+    name.className = 'overlay-name';
+    name.textContent = player.id === session.youAre ? `${player.name} (you)` : player.name;
+
+    const extra = document.createElement('span');
+    extra.className = 'overlay-detail';
+    extra.textContent = detail;
+
+    row.append(swatch, name, extra);
+    return row;
   }
 
   /**
@@ -278,6 +402,13 @@ export class Hud {
       this.copyButton.textContent = 'Copy failed';
     }
   }
+}
+
+/** 1 -> "1st", 2 -> "2nd", 11 -> "11th". */
+function ordinal(n: number): string {
+  const teen = n % 100 >= 11 && n % 100 <= 13;
+  const suffix = teen ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th';
+  return `${n}${suffix}`;
 }
 
 function describeStatus(player: Player): string {

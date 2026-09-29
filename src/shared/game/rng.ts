@@ -45,3 +45,19 @@ export function seedFromString(text: string): number {
   }
   return hash >>> 0;
 }
+
+/**
+ * A uniform integer in [0, maxExclusive) from the platform's cryptographic
+ * generator. For the server's choices nobody should be able to predict, such as
+ * who shoots first. Needs `maxExclusive` between 1 and 2^32.
+ */
+export function cryptoRandomInt(maxExclusive: number): number {
+  const range = 0x1_0000_0000;
+  // Reject the tail of the range so every result stays equally likely.
+  const limit = range - (range % maxExclusive);
+  const buffer = new Uint32Array(1);
+  do {
+    crypto.getRandomValues(buffer);
+  } while (buffer[0] >= limit);
+  return buffer[0] % maxExclusive;
+}

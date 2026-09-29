@@ -11,9 +11,13 @@
  * copy is the one that counts.
  */
 
+import { closestPointsBetweenSegments } from '../physics/geometry';
+import type { Pen } from '../physics/pen';
+import { penEndpoints, stopPen } from '../physics/pen';
 import type { Table } from '../physics/table';
-import { DEFAULT_TABLE, startingPoses } from '../physics/table';
+import { DEFAULT_TABLE, startingPoses, tableBounds } from '../physics/table';
 import { DEFAULT_TUNING, type Tuning } from '../physics/tuning';
+import type { Vec2 } from '../physics/vec2';
 import type { StepResult, World } from '../physics/world';
 import { createWorld, findPen, step } from '../physics/world';
 import type { Strike } from './strike';
@@ -41,6 +45,8 @@ export interface Player {
   /** False while a human is disconnected. Their turns get skipped. */
   connected: boolean;
   eliminated: boolean;
+  /** The turn number they were knocked out on, for the final standings. */
+  outOnTurn: number | null;
   /** The one pen they own. */
   penId: string;
 }
@@ -56,6 +62,31 @@ export interface Match {
   /** Increments every completed turn. Handy for logs and replays. */
   turnNumber: number;
   winnerId: string | null;
+  /**
+   * Seats still to be passed before the opening round is over.
+   *
+   * The opening round is one lap of the table from whoever went first. While
+   * it lasts, a pen knocked off by somebody else's shot is put back on its
+   * starting spot instead of knocking its owner out, so everyone gets at least
+   * one go before the real game begins. Knocking *yourself* off still counts.
+   *
+   * Counted in seats rather than shots, so a seat that is skipped (out, away,
+   * timed out) still uses up its place and the lap always ends.
+   */
+  openingTurnsLeft: number;
+  /** The turn number on which the opening round ended, for the HUD. */
+  openingEndedOnTurn: number | null;
+  /** Players whose pens were put back on their starting spot last turn. */
+  returnedToStart: string[];
+}
+
+export interface MatchOptions {
+  /**
+   * Index into the players of whoever shoots first. The shared code keeps no
+   * randomness of its own, so callers pick this: the server from
+   * `crypto.getRandomValues`, solo play from its seeded generator.
+   */
+  firstTurnIndex?: number;
 }
 
 export interface PlayerSpec {
@@ -72,13 +103,15 @@ export function penIdFor(playerId: string): string {
  * Start a match.
  *
  * Everyone gets one pen, placed evenly around the table, so seating order
- * never confers an advantage.
+ * never confers an advantage. Who shoots first is `options.firstTurnIndex`;
+ * after that the turn goes round in seating order.
  */
 export function createMatch(
   code: string,
   specs: readonly PlayerSpec[],
   table: Table = DEFAULT_TABLE,
   tuning: Tuning = DEFAULT_TUNING,
+  options: MatchOptions = {},
 ): Match {
   const poses = startingPoses(specs.length, table);
 
@@ -89,6 +122,7 @@ export function createMatch(
     isBot: spec.isBot ?? false,
     connected: true,
     eliminated: false,
+    outOnTurn: null,
     penId: penIdFor(spec.id),
   }));
 
@@ -109,10 +143,31 @@ export function createMatch(
     phase: specs.length >= MIN_PLAYERS ? 'aiming' : 'lobby',
     players,
     world,
-    turnIndex: 0,
+    turnIndex: clampFirstTurn(options.firstTurnIndex, specs.length),
     turnNumber: 0,
     winnerId: null,
+    openingTurnsLeft: specs.length,
+    openingEndedOnTurn: null,
+    returnedToStart: [],
   };
+}
+
+function clampFirstTurn(index: number | undefined, playerCount: number): number {
+  if (index === undefined || !Number.isInteger(index) || playerCount === 0) return 0;
+  return ((index % playerCount) + playerCount) % playerCount;
+}
+
+/** Pick a first player uniformly, given any source of random integers. */
+export function randomFirstTurn(
+  playerCount: number,
+  randomInt: (maxExclusive: number) => number,
+): number {
+  return playerCount > 0 ? randomInt(playerCount) : 0;
+}
+
+/** True while pens knocked off by other players are still put back. */
+export function inOpeningRound(match: Match): boolean {
+  return match.openingTurnsLeft > 0;
 }
 
 export function playerById(match: Match, playerId: string): Player | undefined {
@@ -198,6 +253,7 @@ export function stepMatch(match: Match): MatchStepResult {
   let turnEnded = false;
   if (physics.settled) {
     turnEnded = true;
+    match.returnedToStart = inOpeningRound(match) ? returnSparedPens(match, eliminated) : [];
     match.turnNumber += 1;
     concludeTurn(match);
   }
@@ -205,22 +261,115 @@ export function stepMatch(match: Match): MatchStepResult {
   return { ...physics, eliminated, turnEnded };
 }
 
-/** Any pen that finished falling takes its owner out with it. */
+/**
+ * Any pen that finished falling takes its owner out with it.
+ *
+ * Except in the opening round, where only the shooter can be knocked out, and
+ * only by their own shot. Anyone else's pen is left `out` for the rest of the
+ * shot, so the physics plays out untouched, and `returnSparedPens` puts it
+ * back once the table has settled.
+ */
 function applyEliminations(match: Match, fallenPenIds: readonly string[]): string[] {
+  const shooterId = currentPlayer(match)?.id;
   const eliminated: string[] = [];
   for (const penId of fallenPenIds) {
     const player = match.players.find((candidate) => candidate.penId === penId);
-    if (player && !player.eliminated) {
-      player.eliminated = true;
-      eliminated.push(player.id);
-    }
+    if (!player || player.eliminated) continue;
+    if (inOpeningRound(match) && player.id !== shooterId) continue;
+    knockOut(match, player);
+    eliminated.push(player.id);
   }
   return eliminated;
+}
+
+function knockOut(match: Match, player: Player): void {
+  player.eliminated = true;
+  player.outOnTurn = match.turnNumber;
+}
+
+/**
+ * Opening round only: put back every pen that went off the table this shot.
+ *
+ * Each goes to its owner's starting spot, pointing the way it started. If
+ * another pen is sitting there, it moves towards the middle until it is clear.
+ * The shooter's own pen is the exception: it is only still here if the shot
+ * was cut short mid-fall, and going off on your own shot knocks you out.
+ * Returns the owners whose pens were put back, in seating order.
+ */
+function returnSparedPens(match: Match, eliminated: string[]): string[] {
+  const shooterId = currentPlayer(match)?.id;
+  const poses = startingPoses(match.players.length, match.world.table);
+  const returned: string[] = [];
+
+  for (const [seat, player] of match.players.entries()) {
+    if (player.eliminated) continue;
+    const pen = findPen(match.world, player.penId);
+    if (!pen || pen.state === 'onTable') continue;
+
+    if (player.id === shooterId) {
+      knockOut(match, player);
+      eliminated.push(player.id);
+      continue;
+    }
+
+    const pose = poses[seat];
+    const spot = findClearSpot(match, pen, pose.position, pose.angle);
+    pen.x = spot.x;
+    pen.y = spot.y;
+    pen.angle = pose.angle;
+    pen.state = 'onTable';
+    pen.fallProgress = 0;
+    stopPen(pen);
+    returned.push(player.id);
+  }
+
+  return returned;
+}
+
+/** Gap kept between a returned pen and its neighbours. m */
+const RETURN_CLEARANCE = 0.01;
+/** How far each try moves when the starting spot is taken. m */
+const RETURN_STEP = 0.02;
+
+/**
+ * The first point on the line from `start` to the middle of the table where
+ * `pen` would not touch any pen already there. Falls back to a scan of the
+ * table, and finally to `start` itself, so it always has an answer.
+ */
+function findClearSpot(match: Match, pen: Pen, start: Vec2, angle: number): Vec2 {
+  const steps = Math.ceil(Math.hypot(start.x, start.y) / RETURN_STEP);
+  for (let i = 0; i <= steps; i++) {
+    const t = steps === 0 ? 0 : i / steps;
+    const candidate = { x: start.x * (1 - t), y: start.y * (1 - t) };
+    if (isClear(match, pen, candidate, angle)) return candidate;
+  }
+
+  // The whole line is crowded. Scan the table, keeping a pen length clear of
+  // the edges so the spot it lands on is not a death sentence.
+  const b = tableBounds(match.world.table);
+  for (let y = b.minY + pen.length; y <= b.maxY - pen.length; y += RETURN_STEP) {
+    for (let x = b.minX + pen.length; x <= b.maxX - pen.length; x += RETURN_STEP) {
+      if (isClear(match, pen, { x, y }, angle)) return { x, y };
+    }
+  }
+  return { x: start.x, y: start.y };
+}
+
+function isClear(match: Match, pen: Pen, at: Vec2, angle: number): boolean {
+  const [a0, a1] = penEndpoints({ ...pen, x: at.x, y: at.y, angle });
+  for (const other of match.world.pens) {
+    if (other.id === pen.id || other.state !== 'onTable') continue;
+    const [b0, b1] = penEndpoints(other);
+    const gap = closestPointsBetweenSegments(a0, a1, b0, b1).distance;
+    if (gap < pen.radius + other.radius + RETURN_CLEARANCE) return false;
+  }
+  return true;
 }
 
 /** Decide whether the match is over, and if not, hand the turn on. */
 function concludeTurn(match: Match): void {
   const remaining = activePlayers(match);
+  const seatBefore = match.turnIndex;
 
   if (remaining.length <= 1) {
     match.phase = 'finished';
@@ -239,6 +388,19 @@ function concludeTurn(match: Match): void {
 
   match.turnIndex = next;
   match.phase = 'aiming';
+  countOpeningSeats(match, seatBefore, next);
+}
+
+/**
+ * Use up the seats passed on the way to the next player: the one that just
+ * played, plus any skipped over because they were out or away.
+ */
+function countOpeningSeats(match: Match, from: number, to: number): void {
+  if (!inOpeningRound(match)) return;
+  const count = match.players.length;
+  const passed = ((to - from + count - 1) % count) + 1;
+  match.openingTurnsLeft = Math.max(0, match.openingTurnsLeft - passed);
+  if (match.openingTurnsLeft === 0) match.openingEndedOnTurn = match.turnNumber;
 }
 
 /**
@@ -287,6 +449,37 @@ export function setConnected(match: Match, playerId: string, connected: boolean)
   if (!connected && match.phase === 'aiming' && currentPlayer(match)?.id === playerId) {
     skipTurn(match);
   }
+}
+
+export interface Standing {
+  player: Player;
+  /** 1 for the winner. Players who went out on the same shot share a place. */
+  place: number;
+}
+
+/**
+ * Everyone in finishing order: the winner first, then whoever lasted longest.
+ *
+ * In a draw the players who went off together on the final shot share first.
+ */
+export function standings(match: Match): Standing[] {
+  // Higher is better: still on the table beats every knock-out, and a later
+  // knock-out beats an earlier one.
+  const lasted = (player: Player): number =>
+    !player.eliminated ? Number.POSITIVE_INFINITY : (player.outOnTurn ?? -1);
+
+  // Compared rather than subtracted: Infinity - Infinity is NaN. Sort is
+  // stable, so ties keep seating order.
+  const ordered = [...match.players].sort((a, b) =>
+    lasted(a) === lasted(b) ? 0 : lasted(a) > lasted(b) ? -1 : 1,
+  );
+  const result: Standing[] = [];
+  for (const [index, player] of ordered.entries()) {
+    const previous = result[index - 1];
+    const tied = previous !== undefined && lasted(previous.player) === lasted(player);
+    result.push({ player, place: tied ? previous.place : index + 1 });
+  }
+  return result;
 }
 
 /** Convenience for the UI: the pen belonging to a player, if it still exists. */

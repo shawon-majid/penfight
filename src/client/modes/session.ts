@@ -13,6 +13,7 @@ import type { Match } from '../../shared/game/match';
 import { currentPlayer, playerById } from '../../shared/game/match';
 import type { Strike } from '../../shared/game/strike';
 import type { CollisionEvent } from '../../shared/physics/collision';
+import type { WinTally } from '../../shared/net/protocol';
 
 export interface FrameEvents {
   collisions: CollisionEvent[];
@@ -36,6 +37,8 @@ export interface Session {
   readonly hostId: string | null;
   /** A short human-readable note for the HUD, e.g. a connection problem. */
   readonly notice: string | null;
+  /** Games won at this table so far, by player id. Survives rematches. */
+  readonly wins: Readonly<WinTally>;
 
   /** Advance one fixed physics frame. */
   tick(): FrameEvents;
