@@ -4,34 +4,43 @@
 
 import type { BotDifficulty } from '../../shared/game/bots';
 import { normaliseCode } from '../../shared/game/codes';
+import type { Account } from '../account/account';
+import { ProfilePanel, googleButton } from './profile';
 
 export type LobbyChoice =
   | { mode: 'solo'; name: string; botCount: number; difficulty: BotDifficulty }
   | { mode: 'create'; name: string }
   | { mode: 'join'; name: string; code: string };
 
-const NAME_KEY = 'penfight.name';
-
 export class Lobby {
   private readonly root: HTMLElement;
   private readonly onChoose: (choice: LobbyChoice) => void;
+  private readonly account: Account;
+  private readonly profile: ProfilePanel;
+  private readonly accountBar = document.createElement('div');
+  /** The account name last put in the name box, to tell it apart from the player's typing. */
+  private shownName = '';
 
   private readonly nameInput = document.createElement('input');
   private readonly codeInput = document.createElement('input');
   private readonly difficultySelect = document.createElement('select');
   private readonly errorLine = document.createElement('p');
 
-  constructor(root: HTMLElement, onChoose: (choice: LobbyChoice) => void) {
+  constructor(root: HTMLElement, account: Account, onChoose: (choice: LobbyChoice) => void) {
     this.root = root;
+    this.account = account;
     this.onChoose = onChoose;
     this.build();
+    this.profile = new ProfilePanel(root, account);
+    this.renderAccount();
+    account.onChange(() => this.renderAccount());
   }
 
   show(prefillCode?: string | null): void {
     this.root.classList.remove('hidden');
     this.errorLine.textContent = '';
     if (prefillCode) this.codeInput.value = prefillCode;
-    this.nameInput.focus();
+    if (!this.account.signedIn) this.nameInput.focus();
   }
 
   hide(): void {
@@ -42,12 +51,55 @@ export class Lobby {
     this.errorLine.textContent = message;
   }
 
+  /**
+   * Signed in, you play under your profile name, which is changed in the
+   * profile. A guest types one here, and it is remembered on this device.
+   */
   private get playerName(): string {
+    if (this.account.signedIn) return this.account.name;
     return this.nameInput.value.trim().slice(0, 24) || 'Player';
   }
 
   private rememberName(): void {
-    localStorage.setItem(NAME_KEY, this.playerName);
+    if (this.account.signedIn) return;
+    this.account.setName(this.playerName).catch((error: unknown) => {
+      console.error('Could not save the name:', error);
+    });
+  }
+
+  /** Who you are playing as, and the way in or out. */
+  private renderAccount(): void {
+    const { state } = this.account;
+    const label = document.createElement('span');
+    label.className = 'account-label';
+    const profileButton = button('Profile', 'ghost-button', () => this.profile.show());
+
+    if (state.status === 'signedIn') {
+      label.textContent = `Signed in as ${state.profile.displayName}`;
+      const signOut = button('Sign out', 'ghost-button', () => {
+        this.account.signOut().catch((error: unknown) => {
+          console.error('Could not sign out:', error);
+        });
+      });
+      this.accountBar.replaceChildren(label, profileButton, signOut);
+    } else if (state.status === 'loading') {
+      label.textContent = 'Signing you in…';
+      this.accountBar.replaceChildren(label);
+    } else {
+      label.textContent = 'Playing as a guest';
+      this.accountBar.replaceChildren(label, profileButton, googleButton(this.account, 'Sign in'));
+    }
+
+    // The name box is for guests. Signed in, the name lives in the profile.
+    this.nameInput.classList.toggle('hidden', state.status === 'signedIn');
+    // Follow the account's name, unless the player has typed over it.
+    if (this.nameInput.value === this.shownName) this.nameInput.value = this.account.name;
+    this.shownName = this.account.name;
+
+    if (this.account.signInError) {
+      this.setError(`Sign-in failed: ${this.account.signInError}`);
+      this.account.signInError = null;
+    }
   }
 
   private build(): void {
@@ -67,7 +119,7 @@ export class Lobby {
     this.nameInput.type = 'text';
     this.nameInput.maxLength = 24;
     this.nameInput.placeholder = 'Your name';
-    this.nameInput.value = localStorage.getItem(NAME_KEY) ?? '';
+    this.nameInput.value = this.shownName = this.account.name;
     this.nameInput.className = 'text-input';
 
     // --- solo ---
@@ -160,7 +212,10 @@ export class Lobby {
     }
     howTo.append(summary, rules);
 
+    this.accountBar.className = 'account-bar';
+
     card.append(
+      this.accountBar,
       title,
       tagline,
       this.nameInput,

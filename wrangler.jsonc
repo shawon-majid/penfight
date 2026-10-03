@@ -50,6 +50,16 @@
     }
   ],
 
+  // Supabase, for signed-in players. Both of these are public — the same
+  // values ship in the browser bundle. The secret key that lets the server
+  // save online results is NOT here: set it with
+  //   npx wrangler secret put SUPABASE_SECRET_KEY
+  // and, for `pnpm dev:server`, put it in .dev.vars (which git ignores).
+  "vars": {
+    "SUPABASE_URL": "https://ernzabuenbmozqwhhyru.supabase.co",
+    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_eeNofR0AA9wEGphWMEpgkw_YLijduhm"
+  },
+
   "observability": {
     "enabled": true
   }

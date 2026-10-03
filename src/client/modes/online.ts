@@ -24,6 +24,11 @@ import { ChangeEmitter, NO_EVENTS, type FrameEvents, type Session } from './sess
 export interface OnlineOptions {
   code: string;
   name: string;
+  colourIndex: number | null;
+  /** Null for a guest. */
+  accessToken: () => Promise<string | null>;
+  /** Whether the player thinks they are signed in, to warn if the server disagrees. */
+  signedIn: boolean;
 }
 
 export class OnlineSession implements Session {
@@ -37,6 +42,7 @@ export class OnlineSession implements Session {
 
   private readonly emitter = new ChangeEmitter();
   private readonly client: RoomClient;
+  private readonly expectSignedIn: boolean;
   /**
    * Turn numbers whose strike we already played locally. Used to drop the
    * server's echo of our own shot.
@@ -45,6 +51,7 @@ export class OnlineSession implements Session {
 
   constructor(options: OnlineOptions) {
     this.youAre = localPlayerId();
+    this.expectSignedIn = options.signedIn;
     // A placeholder so the renderer has something to draw before the first
     // snapshot lands. It is replaced wholesale by `welcome`.
     this.match = createMatch(options.code, []);
@@ -53,6 +60,8 @@ export class OnlineSession implements Session {
       code: options.code,
       playerId: this.youAre,
       name: options.name,
+      colourIndex: options.colourIndex,
+      accessToken: options.accessToken,
       onMessage: (message) => this.handle(message),
       onStatus: (status) => this.handleStatus(status),
     });
@@ -126,7 +135,10 @@ export class OnlineSession implements Session {
         this.wins = message.wins ?? {};
         applySnapshot(this.match, message.snapshot);
         this.turnEndsAt = message.snapshot.turnEndsAt;
-        this.notice = null;
+        this.notice =
+          this.expectSignedIn && !message.signedIn
+            ? 'Could not confirm your sign-in, so games here will not count on your profile.'
+            : null;
         break;
       }
 

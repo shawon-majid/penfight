@@ -25,6 +25,8 @@ import { applyStrike, checkStrike, sanitiseStrike } from './strike';
 
 export const MAX_PLAYERS = 10;
 export const MIN_PLAYERS = 2;
+/** How many pen colours there are. One per seat, so a full table never runs out. */
+export const PEN_COLOUR_COUNT = MAX_PLAYERS;
 
 export type MatchPhase =
   /** Waiting in the lobby for players. */
@@ -93,6 +95,8 @@ export interface PlayerSpec {
   id: string;
   name: string;
   isBot?: boolean;
+  /** The pen colour this player would like. Honoured unless someone seated earlier has it. */
+  colourIndex?: number;
 }
 
 export function penIdFor(playerId: string): string {
@@ -114,11 +118,12 @@ export function createMatch(
   options: MatchOptions = {},
 ): Match {
   const poses = startingPoses(specs.length, table);
+  const colours = assignColours(specs);
 
   const players: Player[] = specs.map((spec, index) => ({
     id: spec.id,
     name: spec.name,
-    colourIndex: index,
+    colourIndex: colours[index],
     isBot: spec.isBot ?? false,
     connected: true,
     eliminated: false,
@@ -150,6 +155,34 @@ export function createMatch(
     openingEndedOnTurn: null,
     returnedToStart: [],
   };
+}
+
+/**
+ * One colour per player, all different.
+ *
+ * Preferences are honoured in seating order, so if two people both want red,
+ * whoever sat down first gets it. Everyone else — no preference, or theirs was
+ * taken — gets the lowest colour still free, which is simply their seat number
+ * when nobody has asked for anything.
+ */
+export function assignColours(specs: readonly PlayerSpec[]): number[] {
+  const taken = new Set<number>();
+  const result: (number | null)[] = specs.map((spec) => {
+    const wanted = spec.colourIndex;
+    const valid =
+      wanted !== undefined && Number.isInteger(wanted) && wanted >= 0 && wanted < PEN_COLOUR_COUNT;
+    if (!valid || taken.has(wanted)) return null;
+    taken.add(wanted);
+    return wanted;
+  });
+
+  let next = 0;
+  return result.map((colour) => {
+    if (colour !== null) return colour;
+    while (taken.has(next)) next++;
+    taken.add(next);
+    return next;
+  });
 }
 
 function clampFirstTurn(index: number | undefined, playerCount: number): number {

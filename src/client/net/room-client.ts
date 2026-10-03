@@ -12,7 +12,12 @@
  */
 
 import type { ClientMessage, ServerMessage } from '../../shared/net/protocol';
-import { decodeServerMessage, encode } from '../../shared/net/protocol';
+import {
+  SIGNED_IN_SUBPROTOCOL,
+  TOKEN_SUBPROTOCOL_PREFIX,
+  decodeServerMessage,
+  encode,
+} from '../../shared/net/protocol';
 
 export type ConnectionStatus = 'connecting' | 'open' | 'reconnecting' | 'closed';
 
@@ -21,6 +26,13 @@ export interface RoomClientOptions {
   code: string;
   playerId: string;
   name: string;
+  /** Preferred pen colour, or null to take whatever is free. */
+  colourIndex: number | null;
+  /**
+   * The signed-in player's access token, or null for a guest. Asked for on
+   * every connect, so a reconnect an hour later still gets a fresh one.
+   */
+  accessToken: () => Promise<string | null>;
   onMessage: (message: ServerMessage) => void;
   onStatus: (status: ConnectionStatus) => void;
 }
@@ -39,7 +51,7 @@ export class RoomClient {
 
   constructor(options: RoomClientOptions) {
     this.options = options;
-    this.connect();
+    void this.connect();
   }
 
   send(message: ClientMessage): void {
@@ -62,13 +74,24 @@ export class RoomClient {
       player: this.options.playerId,
       name: this.options.name,
     });
+    if (this.options.colourIndex !== null) params.set('colour', String(this.options.colourIndex));
     return `${protocol}//${location.host}/api/table/${this.options.code}/ws?${params}`;
   }
 
-  private connect(): void {
+  private async connect(): Promise<void> {
     this.options.onStatus(this.attempt === 0 ? 'connecting' : 'reconnecting');
 
-    const socket = new WebSocket(this.url());
+    let token: string | null = null;
+    try {
+      token = await this.options.accessToken();
+    } catch {
+      // Could not refresh the sign-in. Join as a guest rather than not at all.
+    }
+    if (this.closedByUs) return;
+
+    // See SIGNED_IN_SUBPROTOCOL: the token rides here, not in the URL.
+    const protocols = token ? [SIGNED_IN_SUBPROTOCOL, TOKEN_SUBPROTOCOL_PREFIX + token] : [];
+    const socket = new WebSocket(this.url(), protocols);
     this.socket = socket;
 
     socket.addEventListener('open', () => {
@@ -98,7 +121,7 @@ export class RoomClient {
     this.options.onStatus('reconnecting');
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      this.connect();
+      void this.connect();
     }, delay);
   }
 

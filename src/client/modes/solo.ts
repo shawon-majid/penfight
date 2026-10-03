@@ -17,6 +17,13 @@ import {
   stepMatch,
   submitStrike,
 } from '../../shared/game/match';
+import {
+  buildMatchRecord,
+  createTally,
+  recordEliminations,
+  type MatchRecord,
+  type ShotTally,
+} from '../../shared/game/results';
 import { createRng, seedFromString, type Rng } from '../../shared/game/rng';
 import { DEFAULT_TABLE } from '../../shared/physics/table';
 import { DEFAULT_TUNING } from '../../shared/physics/tuning';
@@ -33,6 +40,10 @@ export interface SoloOptions {
   playerName: string;
   botCount: number;
   difficulty: BotDifficulty;
+  /** The pen colour the player picked, if any. The bots take what is left. */
+  colourIndex?: number | null;
+  /** Called once when a match ends, with the whole match. */
+  onFinished?: (record: MatchRecord) => void;
   /** Fix the seed to replay an identical match. Defaults to the clock. */
   seed?: number;
 }
@@ -50,6 +61,8 @@ export class SoloSession implements Session {
   private readonly emitter = new ChangeEmitter();
   private readonly options: SoloOptions;
   private rng: Rng;
+  private tally: ShotTally = createTally();
+  private startedAt = new Date();
   private botTimer: ReturnType<typeof setTimeout> | null = null;
   private botThinkingSince: number | null = null;
   private destroyed = false;
@@ -61,7 +74,15 @@ export class SoloSession implements Session {
   }
 
   private buildMatch(): Match {
-    const specs: PlayerSpec[] = [{ id: YOU, name: this.options.playerName || 'You' }];
+    this.tally = createTally();
+    this.startedAt = new Date();
+    const specs: PlayerSpec[] = [
+      {
+        id: YOU,
+        name: this.options.playerName || 'You',
+        colourIndex: this.options.colourIndex ?? undefined,
+      },
+    ];
     for (let i = 0; i < this.options.botCount; i++) {
       specs.push({ id: `bot-${i}`, name: BOT_NAMES[i % BOT_NAMES.length], isBot: true });
     }
@@ -75,12 +96,27 @@ export class SoloSession implements Session {
     if (this.destroyed) return NO_EVENTS;
 
     if (this.match.phase === 'resolving') {
+      // Read before stepping: the turn passes on the frame the table settles.
+      const shooterId = currentPlayer(this.match)?.id;
       const result = stepMatch(this.match);
+      if (shooterId) recordEliminations(this.tally, shooterId, result.eliminated);
       // Widened by hand: TypeScript does not know stepMatch can end the match.
       const phase = this.match.phase as MatchPhase;
       const { winnerId } = this.match;
-      if (result.turnEnded && phase === 'finished' && winnerId) {
-        this.wins[winnerId] = (this.wins[winnerId] ?? 0) + 1;
+      if (result.turnEnded && phase === 'finished') {
+        if (winnerId) this.wins[winnerId] = (this.wins[winnerId] ?? 0) + 1;
+        this.options.onFinished?.(
+          buildMatchRecord(this.match, this.tally, {
+            id: crypto.randomUUID(),
+            mode: 'solo',
+            difficulty: this.options.difficulty,
+            startedAt: this.startedAt,
+            endedAt: new Date(),
+            // Solo games know nothing of accounts; the database files the
+            // player's seat under whoever is signed in.
+            accountIdOf: () => null,
+          }),
+        );
       }
       if (result.turnEnded || result.eliminated.length > 0) this.emitter.emit();
       return result;

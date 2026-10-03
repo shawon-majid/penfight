@@ -8,6 +8,8 @@
 
 import { DEFAULT_TUNING } from '../shared/physics/tuning';
 import { SIM_STEP } from '../shared/physics/world';
+import type { MatchRecord } from '../shared/game/results';
+import { Account } from './account/account';
 import { ClackAudio } from './audio/clack';
 import { AimController, type AimSnapshot } from './input/aim';
 import { OnlineSession } from './modes/online';
@@ -39,6 +41,7 @@ export class App {
   private readonly renderer: Renderer;
   private readonly hud: Hud;
   private readonly audio = new ClackAudio();
+  private readonly account = new Account();
 
   /** The match in progress. Public so dev tooling can inspect and drive it. */
   session: Session | null = null;
@@ -53,7 +56,7 @@ export class App {
   constructor(elements: AppElements) {
     this.elements = elements;
     this.renderer = new Renderer(elements.canvas);
-    this.lobby = new Lobby(elements.lobby, (choice) => void this.begin(choice));
+    this.lobby = new Lobby(elements.lobby, this.account, (choice) => void this.begin(choice));
     this.hud = new Hud(elements.hud, {
       onRematch: () => this.session?.requestRematch(),
       onStart: () => {
@@ -69,6 +72,8 @@ export class App {
   start(): void {
     const invited = new URLSearchParams(location.search).get('table');
     this.showLobby(invited);
+    // Guests: returns at once. Signed in, or back from Google: fills in the lobby when ready.
+    void this.account.init();
   }
 
   private showLobby(prefillCode?: string | null): void {
@@ -121,13 +126,28 @@ export class App {
         playerName: choice.name,
         botCount: choice.botCount,
         difficulty: choice.difficulty,
+        colourIndex: this.account.colour,
+        onFinished: (record) => this.recordSolo(record),
       });
     }
 
     const code = choice.mode === 'create' ? await requestNewTableCode() : choice.code;
     // Keep the invite link in the address bar so a refresh rejoins the table.
     history.replaceState(null, '', `${location.pathname}?table=${code}`);
-    return new OnlineSession({ code, name: choice.name });
+    return new OnlineSession({
+      code,
+      name: choice.name,
+      colourIndex: this.account.colour,
+      accessToken: () => this.account.accessToken(),
+      signedIn: this.account.signedIn,
+    });
+  }
+
+  /** Solo games go on the player's record: in this browser for a guest, on their profile if signed in. */
+  private recordSolo(record: MatchRecord): void {
+    this.account
+      .recordSolo(record)
+      .catch((error: unknown) => console.error('Could not record the game:', error));
   }
 
   private leave(): void {

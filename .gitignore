@@ -3,3 +3,5 @@ dist/
 .wrangler/
 *.log
 .DS_Store
+# Local Worker secrets (SUPABASE_SECRET_KEY)
+.dev.vars

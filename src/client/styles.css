@@ -245,6 +245,220 @@ select.text-input {
   line-height: 1.6;
 }
 
+/* ---------- Account ---------- */
+
+.account-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -8px 0 18px;
+  flex-wrap: wrap;
+}
+
+.account-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--ink-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Light, like Google's own buttons, so it reads as "the Google one" at a glance. */
+.google-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: var(--tap);
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  border: 1px solid #dadce0;
+  background: #fff;
+  color: #1f1f1f;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  touch-action: manipulation;
+}
+
+.google-button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.google-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: conic-gradient(#ea4335 0 25%, #fbbc05 0 50%, #34a853 0 75%, #4285f4 0);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.profile-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: calc(16px + var(--safe-top)) calc(16px + var(--safe-right))
+    calc(16px + var(--safe-bottom)) calc(16px + var(--safe-left));
+  background: rgba(6, 7, 10, 0.72);
+  overflow-y: auto;
+}
+
+.profile-card {
+  width: min(480px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 22px 24px 26px;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.55);
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.profile-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.profile-header h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.profile-section {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.profile-section h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+}
+
+.colour-picker {
+  display: grid;
+  grid-template-columns: repeat(5, var(--tap));
+  gap: 10px;
+}
+
+.colour-swatch {
+  width: var(--tap);
+  height: var(--tap);
+  border-radius: 50%;
+  border: 3px solid transparent;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.colour-swatch[aria-checked='true'] {
+  outline: 3px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.colour-swatch:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.stat {
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+}
+
+.stat dt {
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.stat dd {
+  margin: 2px 0 0;
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.bot-record,
+.recent-games {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bot-record li,
+.recent-games li {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+
+.bot-record li:last-child,
+.recent-games li:last-child {
+  border-bottom: 0;
+}
+
+.bot-record li span:first-child {
+  flex: 1;
+}
+
+.bot-record li span:last-child {
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.recent-place {
+  flex: 0 0 72px;
+  font-weight: 600;
+}
+
+.recent-games .is-win .recent-place {
+  color: var(--accent);
+}
+
+.recent-detail {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-date {
+  color: var(--ink-dim);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 /* ---------- Game ---------- */
 
 #game {
@@ -622,4 +836,11 @@ select.text-input {
   .overlay {
     backdrop-filter: none;
   }
+}
+
+.name-status {
+  min-height: 20px;
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--ink-dim);
 }

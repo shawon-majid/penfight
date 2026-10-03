@@ -62,6 +62,7 @@ src/
     ui/            lobby and heads-up display
     modes/         solo and online sessions behind one interface
   server/          Cloudflare Worker + one Durable Object per table
+supabase/          database schema for accounts and results
 tests/             covers src/shared, plus the viewport maths
 ```
 
@@ -176,6 +177,67 @@ A player who drops keeps their seat and their pen. Their turns are skipped
 until they return, and their pen is still fair game in the meantime. Turns also
 have a 45-second clock, so one person wandering off cannot freeze a ten-person
 table.
+
+## Accounts
+
+Signing in is optional. Guests keep everything in the browser — name, pen
+colour and games against the bots, in local storage — and never touch
+Supabase; its library is not even downloaded until someone presses "Sign in".
+
+Signing in is Google through **Supabase Auth**. The first time, the guest's
+name, colour and bot games are copied into the new profile. From then on:
+
+- **Online games are recorded by the server, not the browser.** A signed-in
+  browser offers its access token as a websocket subprotocol (browsers cannot
+  set headers on a websocket, and this keeps it out of URLs and logs). The
+  Worker asks Supabase whose token it is and seats the player as
+  `acct:<user id>`; everyone else is `guest:<browser id>`, so a guest can never
+  claim an account's seat. When a match ends, the table saves it — every seat,
+  guests included — if anyone at it was signed in. All-guest games are not
+  saved.
+- **Solo games are self-reported**, since solo runs in the browser. The
+  database files the one non-bot seat under whoever is signed in, whatever the
+  request says, and keeps them apart (`mode = 'solo'`).
+- **Stats are computed from the games** (`my_profile_summary()`), so there is
+  no running total to drift.
+
+### The database
+
+| Table | One row per | Holds |
+| --- | --- | --- |
+| `profiles` | signed-in player | name, pen colour, `settings` (JSON) |
+| `matches` | finished game | mode, table code or bot difficulty, `ruleset`, turns, times, `details` (JSON) |
+| `match_players` | seat in a game | account (if any), kind (`account`/`guest`/`bot`), name at the time, colour, place, won, knock-outs, fell off, `stats` (JSON) |
+
+Built to change without breaking:
+
+- **Only add.** New columns are nullable or have a default. Renames and drops
+  go in three steps: add the new one, move the code over, drop the old one in
+  a later release.
+- **Columns for what you filter or rank by, JSON for experiments.** A new
+  number starts in `stats`; promote it to a column once a leaderboard needs it.
+- **`ruleset`** records which rules a game was played under. Bump `RULESET` in
+  `shared/game/results.ts` when the rules change, so stats can tell them apart.
+- **Nobody touches the tables directly.** Browsers and the server go through
+  functions — `my_profile_summary`, `my_recent_matches`, `record_solo_matches`,
+  and `record_online_match` (secret key only) — so the tables can be reshaped
+  behind them without a client release.
+- New features are new tables (achievements, pen skins, friends, replays),
+  not changes to these.
+
+Every change is a migration in `supabase/migrations/`. Setup:
+
+1. In Supabase → Authentication → Providers, enable **Google** with a client
+   ID and secret from a Google Cloud OAuth client.
+2. In Supabase → Authentication → URL Configuration, allow the site's
+   addresses as redirect URLs (`https://penfight.shawonmajid.com/**`, the
+   workers.dev address, and `http://localhost:5173/**`).
+3. `npx wrangler secret put SUPABASE_SECRET_KEY` so the deployed server can
+   save results. For `pnpm dev:server`, put the same line in `.dev.vars`
+   (git-ignored): `SUPABASE_SECRET_KEY=...`.
+
+The project URL and publishable key are public and live in `.env` (browser)
+and `wrangler.jsonc` (server).
 
 ## Bots
 

@@ -35,6 +35,7 @@ import {
   type Match,
   type PlayerSpec,
 } from '../shared/game/match';
+import { buildMatchRecord, createTally, recordEliminations, type ShotTally } from '../shared/game/results';
 import { cryptoRandomInt } from '../shared/game/rng';
 import { DEFAULT_TABLE } from '../shared/physics/table';
 import { DEFAULT_TUNING } from '../shared/physics/tuning';
@@ -52,6 +53,7 @@ import {
   restoreMatch,
   snapshotMatch,
 } from '../shared/net/protocol';
+import { accountIdOf, acceptedSubprotocol, saveOnlineMatch, type SupabaseEnv } from './supabase';
 
 /** How long a player has to take their shot before the table moves on. */
 const TURN_SECONDS = 45;
@@ -65,13 +67,14 @@ interface Seat {
   sockets: Set<WebSocket>;
 }
 
-export interface Env {
+export interface Env extends SupabaseEnv {
   TABLE_ROOM: DurableObjectNamespace;
   ASSETS: Fetcher;
 }
 
 export class TableRoom implements DurableObject {
   private readonly state: DurableObjectState;
+  private readonly env: Env;
   private code = '';
   /** Everyone who has taken a seat, in join order. */
   private seats = new Map<string, Seat>();
@@ -80,12 +83,19 @@ export class TableRoom implements DurableObject {
   private hostId: string | null = null;
   /** Games won at this table, by player id. Kept across rematches. */
   private wins: WinTally = {};
+  /** Identifies the current match in saved results, so saving twice is harmless. */
+  private matchId: string | null = null;
+  /** When the current match was dealt. ms since the epoch. */
+  private matchStartedAt: number | null = null;
+  /** Knock-outs and self-falls in the current match, for the players' profiles. */
+  private tally: ShotTally = createTally();
   private turnEndsAt: number | null = null;
   private turnTimer: ReturnType<typeof setTimeout> | null = null;
   private settleTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(state: DurableObjectState, _env: Env) {
+  constructor(state: DurableObjectState, env: Env) {
     this.state = state;
+    this.env = env;
     // Restore across an eviction, so a table survives a quiet spell.
     this.state.blockConcurrencyWhile(async () => {
       const saved = await this.state.storage.get<PersistedTable>('table');
@@ -106,22 +116,34 @@ export class TableRoom implements DurableObject {
       return new Response('Expected a websocket.', { status: 426 });
     }
 
+    // Set by the Worker, which has already decided who this is.
     const playerId = url.searchParams.get('player');
     const name = (url.searchParams.get('name') ?? '').slice(0, 24) || 'Player';
+    const colour = Number.parseInt(url.searchParams.get('colour') ?? '', 10);
     if (!playerId) return new Response('Missing player id.', { status: 400 });
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     server.accept();
-    this.onOpen(server, playerId, name);
+    this.onOpen(server, playerId, name, Number.isNaN(colour) ? undefined : colour);
 
-    return new Response(null, { status: 101, webSocket: client });
+    const protocol = acceptedSubprotocol(request);
+    return new Response(null, {
+      status: 101,
+      webSocket: client,
+      headers: protocol ? { 'Sec-WebSocket-Protocol': protocol } : {},
+    });
   }
 
   // -- connections ----------------------------------------------------------
 
-  private onOpen(socket: WebSocket, playerId: string, name: string): void {
-    const seat = this.claimSeat(playerId, name);
+  private onOpen(
+    socket: WebSocket,
+    playerId: string,
+    name: string,
+    colourIndex: number | undefined,
+  ): void {
+    const seat = this.claimSeat(playerId, name, colourIndex);
     if (seat) {
       seat.sockets.add(socket);
       if (this.match) setConnected(this.match, playerId, true);
@@ -144,6 +166,7 @@ export class TableRoom implements DurableObject {
       snapshot: this.snapshot(),
       wins: { ...this.wins },
       version: PROTOCOL_VERSION,
+      signedIn: accountIdOf(playerId) !== null,
     });
     this.broadcastSnapshot();
   }
@@ -154,17 +177,19 @@ export class TableRoom implements DurableObject {
    * Returning to your own seat is what makes a refresh or a flaky connection
    * survivable: your pen is still there, exactly where you left it.
    */
-  private claimSeat(playerId: string, name: string): Seat | null {
+  private claimSeat(playerId: string, name: string, colourIndex: number | undefined): Seat | null {
     const existing = this.seats.get(playerId);
     if (existing) {
       existing.spec.name = name;
+      // The colour is fixed once a match is dealt; before that, follow the player's choice.
+      if (!this.match) existing.spec.colourIndex = colourIndex;
       return existing;
     }
 
     // Once a match is under way the seats are fixed; latecomers spectate.
     if (this.match || this.seats.size >= MAX_PLAYERS) return null;
 
-    const seat: Seat = { spec: { id: playerId, name }, sockets: new Set() };
+    const seat: Seat = { spec: { id: playerId, name, colourIndex }, sockets: new Set() };
     this.seats.set(playerId, seat);
     return seat;
   }
@@ -261,6 +286,9 @@ export class TableRoom implements DurableObject {
   /** A fresh match for everyone seated, with a first player nobody can predict. */
   private dealMatch(): Match {
     const specs = this.rosterSpecs();
+    this.matchId = crypto.randomUUID();
+    this.matchStartedAt = Date.now();
+    this.tally = createTally();
     return createMatch(this.code, specs, DEFAULT_TABLE, DEFAULT_TUNING, {
       firstTurnIndex: randomFirstTurn(specs.length, cryptoRandomInt),
     });
@@ -294,14 +322,16 @@ export class TableRoom implements DurableObject {
     let frames = 0;
     while (frames < MAX_SHOT_FRAMES) {
       const step = stepMatch(match);
+      recordEliminations(this.tally, playerId, step.eliminated);
       frames++;
       if (step.settled) break;
     }
 
     // A shot is the only thing that can end a match, so this is the one place
-    // a win is counted.
-    if (match.phase === 'finished' && match.winnerId) {
-      this.wins[match.winnerId] = (this.wins[match.winnerId] ?? 0) + 1;
+    // a win is counted and results are saved.
+    if (match.phase === 'finished') {
+      if (match.winnerId) this.wins[match.winnerId] = (this.wins[match.winnerId] ?? 0) + 1;
+      this.saveResults(match);
     }
 
     const animationMs = (frames / SIM_HZ) * 1000 + SETTLE_BUFFER_MS;
@@ -311,6 +341,23 @@ export class TableRoom implements DurableObject {
       this.broadcastSnapshot();
       this.persist();
     }, animationMs);
+  }
+
+  /** Hand the finished match to Supabase, if anyone at the table is signed in. */
+  private saveResults(match: Match): void {
+    if (!this.matchId) return;
+    const record = buildMatchRecord(match, this.tally, {
+      id: this.matchId,
+      mode: 'online',
+      tableCode: this.code,
+      startedAt: new Date(this.matchStartedAt ?? Date.now()),
+      endedAt: new Date(),
+      accountIdOf,
+    });
+    const saving = saveOnlineMatch(this.env, record).catch((error: unknown) =>
+      console.error('Saving the match failed:', error),
+    );
+    this.state.waitUntil(saving);
   }
 
   // -- turn clock -----------------------------------------------------------
@@ -419,6 +466,9 @@ export class TableRoom implements DurableObject {
       roster: this.rosterSpecs(),
       snapshot: this.match ? snapshotMatch(this.match, null) : null,
       wins: this.wins,
+      matchId: this.matchId,
+      matchStartedAt: this.matchStartedAt,
+      tally: this.tally,
     };
     void this.state.storage.put('table', payload);
   }
@@ -427,6 +477,9 @@ export class TableRoom implements DurableObject {
     this.code = saved.code;
     this.hostId = saved.hostId;
     this.wins = { ...(saved.wins ?? {}) };
+    this.matchId = saved.matchId ?? null;
+    this.matchStartedAt = saved.matchStartedAt ?? null;
+    this.tally = saved.tally ?? createTally();
     this.seats = new Map(
       saved.roster.map((spec) => [spec.id, { spec, sockets: new Set<WebSocket>() }]),
     );
@@ -446,6 +499,10 @@ interface PersistedTable {
   snapshot: MatchSnapshot | null;
   /** Missing from tables saved before wins were counted. */
   wins?: WinTally;
+  /** Missing from tables saved before results were recorded. */
+  matchId?: string | null;
+  matchStartedAt?: number | null;
+  tally?: ShotTally;
 }
 
 function describeRejection(reason: string): string {

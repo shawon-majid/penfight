@@ -25,7 +25,16 @@ import { createWorld, type World } from '../physics/world';
 import type { Match, MatchPhase, Player } from '../game/match';
 import type { Strike } from '../game/strike';
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
+
+/**
+ * Signed-in browsers open their socket offering two subprotocols: this one,
+ * which the server echoes back, and their access token behind
+ * `TOKEN_SUBPROTOCOL_PREFIX`. Browsers cannot set headers on a websocket, and
+ * this keeps the token out of the URL and so out of request logs.
+ */
+export const SIGNED_IN_SUBPROTOCOL = 'penfight';
+export const TOKEN_SUBPROTOCOL_PREFIX = 'penfight.token.';
 
 // ---------------------------------------------------------------------------
 // Snapshots
@@ -179,6 +188,8 @@ export type ServerMessage =
       snapshot: MatchSnapshot;
       wins: WinTally;
       version: number;
+      /** True when the server recognised your account, so this table's games count. */
+      signedIn: boolean;
     }
   /** Full authoritative state. Snap to this. */
   | { type: 'snapshot'; snapshot: MatchSnapshot; hostId: string; wins: WinTally }
