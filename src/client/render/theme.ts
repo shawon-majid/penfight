@@ -49,9 +49,9 @@ export const THEME = {
   tableRim: '#241a12',
   tableShadow: 'rgba(0, 0, 0, 0.55)',
   penShadow: 'rgba(0, 0, 0, 0.35)',
-  aimGuide: 'rgba(255, 255, 255, 0.75)',
-  aimGuideFaint: 'rgba(255, 255, 255, 0.22)',
-  danger: '#ff5a5a',
+  aimGuide: 'rgba(239, 236, 231, 0.82)',
+  aimGuideFaint: 'rgba(239, 236, 231, 0.26)',
+  danger: '#f0786a',
   text: '#f2efe9',
   textDim: 'rgba(242, 239, 233, 0.55)',
 } as const;

@@ -9,8 +9,23 @@
       name="description"
       content="Flick your pen, knock everyone else off the table. Last pen standing wins."
     />
+    <style>
+      /* Inline so the boot screen is dark from the very first paint, before any script or stylesheet arrives. */
+      html, body { margin: 0; background: #08070a; }
+      #boot { position: fixed; inset: 0; z-index: 100; background: #08070a; transition: opacity 0.35s ease; }
+      #boot.leaving { opacity: 0; pointer-events: none; }
+      #boot canvas { display: block; width: 100%; height: 100%; }
+    </style>
   </head>
   <body>
+    <div id="boot" role="progressbar" aria-label="Loading Pen Fight"><canvas></canvas></div>
+    <script>
+      // The boot screen is for the first visit in a tab. A reload in the same
+      // tab skips it — taken out here, before it can paint even one frame.
+      try {
+        if (sessionStorage.getItem('penfight:booted')) document.getElementById('boot').remove();
+      } catch {}
+    </script>
     <div id="app">
       <div id="lobby"></div>
       <div id="game" class="hidden">

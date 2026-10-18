@@ -12,16 +12,25 @@
  */
 
 :root {
-  --ink: #f2efe9;
-  --ink-dim: rgba(242, 239, 233, 0.58);
-  --surface: #1b1e25;
-  --surface-raised: #242832;
-  --line: rgba(242, 239, 233, 0.12);
-  --accent: #f0b429;
-  --danger: #ff6b6b;
+  /* Warm pearl on a dark desk, champagne for the few things worth a glance. */
+  --ink: #efece7;
+  --ink-title: #ece9e4;
+  --ink-dim: #8f8a82;
+  --ink-caption: #8a857d;
+  --night: #08070a;
+  --surface: rgba(18, 16, 15, 0.8);
+  --surface-raised: rgba(255, 248, 235, 0.045);
+  --line: rgba(214, 200, 175, 0.18);
+  --line-strong: rgba(214, 200, 175, 0.34);
+  --accent: #cdb894;
+  --on-accent: #211a10;
+  --champagne: linear-gradient(180deg, #e8dbbd 0%, #cdb894 48%, #ab9570 100%);
+  --danger: #e8a29a;
   --radius: 12px;
-  --font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --serif: 'Fraunces Variable', Georgia, 'Times New Roman', serif;
   --tap: 44px;
+  --glass-shadow: 0 30px 80px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.06);
 
   /* Keeps the display clear of notches and home indicators. */
   --safe-top: env(safe-area-inset-top, 0px);
@@ -39,7 +48,7 @@ body {
   margin: 0;
   /* dvh, not vh: iOS Safari's address bar slides away and vh does not notice. */
   height: 100dvh;
-  background: #101216;
+  background: var(--night);
   color: var(--ink);
   font-family: var(--font);
   overscroll-behavior: none; /* no pull-to-refresh mid-shot */
@@ -62,78 +71,266 @@ body {
   display: none !important;
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Small spaced capitals over a field or a section. */
+.eyebrow {
+  display: block;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--ink-caption);
+}
+
 /* ---------- Lobby ---------- */
 
 .lobby {
   position: absolute;
   inset: 0;
-  display: grid;
-  place-items: center;
-  padding: calc(20px + var(--safe-top)) calc(16px + var(--safe-right))
-    calc(20px + var(--safe-bottom)) calc(16px + var(--safe-left));
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  background: radial-gradient(circle at 50% 30%, #1d2129, #0c0e12 70%);
 }
 
-.lobby-card {
-  width: min(460px, 100%);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  padding: 28px;
-  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.55);
+/* The lamp-lit desk. Fixed, so the page scrolls over it rather than with it. */
+.desk-backdrop {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  z-index: 0;
 }
 
-.lobby-card h1 {
-  margin: 0 0 6px;
-  font-size: clamp(28px, 8vw, 34px);
-  letter-spacing: -0.02em;
+.lobby-page {
+  position: relative;
+  z-index: 1;
+  width: min(860px, 100%);
+  min-height: 100%;
+  margin: 0 auto;
+  padding: calc(18px + var(--safe-top)) calc(20px + var(--safe-right))
+    calc(28px + var(--safe-bottom)) calc(20px + var(--safe-left));
+  display: flex;
+  flex-direction: column;
+}
+
+.lobby-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lobby-mark {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 17px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-title);
+}
+
+.lobby-hero {
+  margin: clamp(24px, 7vh, 64px) auto clamp(20px, 4vh, 36px);
+  text-align: center;
+  max-width: 560px;
+}
+
+.lobby-title {
+  margin: 0;
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: clamp(40px, 9vw, 68px);
+  line-height: 1.05;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-title);
+  text-shadow: 0 8px 24px rgba(0, 0, 0, 0.65);
 }
 
 .tagline {
-  margin: 0 0 22px;
-  color: var(--ink-dim);
+  margin: 12px 0 0;
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 16px;
   line-height: 1.5;
+  color: #a39d92;
 }
 
-.lobby-card section {
-  margin-top: 22px;
-  padding-top: 20px;
-  border-top: 1px solid var(--line);
+.name-field {
+  display: block;
+  width: min(320px, 100%);
+  margin: 24px auto 0;
+  text-align: left;
 }
 
-.lobby-card h2 {
-  margin: 0 0 4px;
-  font-size: 15px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--ink-dim);
+.name-field .eyebrow {
+  margin: 0 0 8px 4px;
+}
+
+.lobby-modes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.mode-card,
+.how-to {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  box-shadow: var(--glass-shadow);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+.mode-card {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+  animation: rise 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.mode-card + .mode-card {
+  animation-delay: 0.08s;
+}
+
+@media (hover: hover) {
+  .mode-card:hover {
+    border-color: var(--line-strong);
+    box-shadow: var(--glass-shadow), 0 0 0 1px rgba(205, 184, 148, 0.12),
+      0 0 36px rgba(205, 184, 148, 0.1);
+    transform: translateY(-2px);
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+}
+
+.mode-art {
+  display: block;
+  width: calc(100% - 24px);
+  height: 140px;
+  margin: 12px 12px 0;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
+.mode-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px 20px;
+}
+
+.mode-title {
+  margin: 0;
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 28px;
+  color: var(--ink-title);
+}
+
+.mode-body .section-body {
+  margin: -8px 0 0;
+  flex: 1;
+}
+
+.mode-body .row {
+  margin-top: 0;
 }
 
 .section-body {
   margin: 0 0 14px;
   color: var(--ink-dim);
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.55;
+}
+
+/* Easy / Normal / Hard. Real radio buttons underneath, so arrow keys work. */
+.segmented {
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.segmented label {
+  flex: 1;
+  position: relative;
+}
+
+.segmented input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.segmented span {
+  display: grid;
+  place-items: center;
+  min-height: 36px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.segmented input:checked + span {
+  color: var(--accent);
+  border-color: rgba(205, 184, 148, 0.6);
+  background: rgba(205, 184, 148, 0.1);
+}
+
+.segmented input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .text-input {
   width: 100%;
   min-height: var(--tap);
-  padding: 12px 14px;
-  background: var(--surface-raised);
+  padding: 12px 16px;
+  background: rgba(255, 248, 235, 0.045);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   color: var(--ink);
   font: inherit;
   /* 16px or larger, or iOS zooms the whole page in when the field is focused. */
   font-size: 16px;
+  transition: border-color 0.2s ease, background 0.2s ease;
 }
 
-.text-input:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+.text-input::placeholder {
+  color: #6f6a62;
+}
+
+.text-input:focus {
+  outline: none;
+  border-color: rgba(205, 184, 148, 0.6);
+  background: rgba(255, 248, 235, 0.07);
 }
 
 select.text-input {
@@ -148,8 +345,16 @@ select.text-input {
 
 .code-input {
   text-transform: uppercase;
+  letter-spacing: 0.4em;
+  font-family: var(--serif);
+  font-weight: 500;
+  color: var(--accent);
+}
+
+.code-input::placeholder {
+  font-family: var(--font);
   letter-spacing: 0.28em;
-  font-weight: 600;
+  font-size: 12px;
 }
 
 .row {
@@ -166,21 +371,45 @@ select.text-input {
 .primary-button,
 .secondary-button,
 .ghost-button {
+  position: relative;
+  overflow: hidden;
   min-height: var(--tap);
-  padding: 12px 18px;
-  border-radius: var(--radius);
+  padding: 12px 20px;
+  border-radius: 999px;
   font: inherit;
+  font-size: 12px;
   font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
   cursor: pointer;
   border: 1px solid transparent;
   white-space: nowrap;
   touch-action: manipulation; /* no 300ms double-tap delay */
+  transition: filter 0.2s ease, transform 0.15s ease;
 }
 
 .primary-button {
   width: 100%;
-  background: var(--accent);
-  color: #221a05;
+  background: var(--champagne);
+  color: var(--on-accent);
+  box-shadow: 0 8px 22px rgba(205, 184, 148, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+/* A soft sheen that passes over a champagne button when you point at it. */
+.primary-button::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.55) 50%, transparent 70%);
+  transform: translateX(-120%);
+  pointer-events: none;
+}
+
+@media (hover: hover) {
+  .primary-button:hover::after {
+    transform: translateX(120%);
+    transition: transform 0.7s ease;
+  }
 }
 
 .row .primary-button,
@@ -190,26 +419,25 @@ select.text-input {
 }
 
 .secondary-button {
-  background: var(--surface-raised);
-  border-color: var(--line);
-  color: var(--ink);
+  background: transparent;
+  border-color: rgba(205, 184, 148, 0.55);
+  color: var(--accent);
 }
 
 .ghost-button {
-  min-height: var(--tap);
+  min-height: 36px;
   padding: 8px 14px;
   background: transparent;
   border-color: var(--line);
   color: var(--ink-dim);
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 10.5px;
 }
 
 @media (hover: hover) {
   .primary-button:hover,
   .secondary-button:hover,
   .ghost-button:hover {
-    filter: brightness(1.12);
+    filter: brightness(1.1);
   }
 }
 
@@ -217,69 +445,155 @@ select.text-input {
 .secondary-button:active,
 .ghost-button:active {
   filter: brightness(0.92);
+  transform: scale(0.985);
+}
+
+.primary-button:focus-visible,
+.secondary-button:focus-visible,
+.ghost-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }
 
 .error {
-  margin: 14px 0 0;
+  margin: 16px 0 0;
   min-height: 20px;
   color: var(--danger);
   font-size: 14px;
+  text-align: center;
 }
 
 .how-to {
-  margin-top: 18px;
+  margin: 4px auto 0;
+  width: min(560px, 100%);
+  padding: 2px 20px;
+  border-radius: 16px;
   color: var(--ink-dim);
   font-size: 14px;
+  animation: rise 0.6s 0.16s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
 .how-to summary {
   cursor: pointer;
   /* Padding rather than flex, so the disclosure triangle survives and the row
      is still a comfortable tap target. */
-  padding: 11px 0;
+  padding: 12px 0;
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 15px;
+  color: #a39d92;
 }
 
 .how-to ul {
-  margin: 10px 0 0;
+  margin: 0 0 16px;
   padding-left: 18px;
-  line-height: 1.6;
+  line-height: 1.65;
+}
+
+.how-to li::marker {
+  color: var(--accent);
 }
 
 /* ---------- Account ---------- */
 
 .account-bar {
+  margin-left: auto;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
-  margin: -8px 0 18px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .account-label {
-  flex: 1;
-  min-width: 0;
   font-size: 13px;
   color: var(--ink-dim);
+}
+
+.account-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--tap);
+  max-width: 220px;
+  padding: 5px 16px 5px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: border-color 0.2s ease;
+}
+
+@media (hover: hover) {
+  .account-chip:hover {
+    border-color: var(--line-strong);
+  }
+}
+
+.account-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.account-avatar {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: 0 0 0 2px var(--ring, var(--accent)), 0 0 12px var(--ring, transparent);
+  font-family: var(--serif);
+  font-size: 15px;
+  color: var(--ink-title);
+}
+
+.account-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.account-name {
+  font-size: 13px;
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* Light, like Google's own buttons, so it reads as "the Google one" at a glance. */
+.account-caption {
+  font-size: 8.5px;
+  font-weight: 500;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--ink-caption);
+}
+
+/* Google's own dark-theme button, so it is still recognisably "the Google one". */
 .google-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
   min-height: var(--tap);
-  padding: 8px 14px;
-  border-radius: var(--radius);
-  border: 1px solid #dadce0;
-  background: #fff;
-  color: #1f1f1f;
+  padding: 8px 16px 8px 12px;
+  border-radius: 999px;
+  border: 1px solid #8e918f;
+  background: #131314;
+  color: #e3e3e3;
   font: inherit;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
   touch-action: manipulation;
@@ -310,7 +624,9 @@ select.text-input {
   place-items: center;
   padding: calc(16px + var(--safe-top)) calc(16px + var(--safe-right))
     calc(16px + var(--safe-bottom)) calc(16px + var(--safe-left));
-  background: rgba(6, 7, 10, 0.72);
+  background: rgba(6, 5, 7, 0.6);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
   overflow-y: auto;
 }
 
@@ -319,11 +635,11 @@ select.text-input {
   max-height: 100%;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  background: var(--surface);
+  background: rgba(18, 16, 15, 0.92);
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: 20px;
   padding: 22px 24px 26px;
-  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.55);
+  box-shadow: var(--glass-shadow);
   -webkit-user-select: text;
   user-select: text;
 }
@@ -337,7 +653,10 @@ select.text-input {
 
 .profile-header h2 {
   margin: 0;
-  font-size: 22px;
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 26px;
+  color: var(--ink-title);
 }
 
 .profile-section {
@@ -399,8 +718,9 @@ select.text-input {
 
 .stat dd {
   margin: 2px 0 0;
-  font-size: 22px;
-  font-weight: 700;
+  font-family: var(--serif);
+  font-size: 24px;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
 
@@ -459,6 +779,166 @@ select.text-input {
   white-space: nowrap;
 }
 
+/* ---------- Waiting room ---------- */
+
+.room {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: var(--night);
+  overflow: hidden;
+  animation: room-in 0.35s ease both;
+}
+
+@keyframes room-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.room-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.room-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: calc(14px + var(--safe-top)) calc(18px + var(--safe-right)) 0
+    calc(18px + var(--safe-left));
+}
+
+/* The table's name, sitting in the middle of the table. Placed by room.ts. */
+.room-centre {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.room-centre .eyebrow {
+  color: #d8c79c;
+}
+
+.room-code {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: clamp(22px, 5vw, 32px);
+  letter-spacing: 0.18em;
+  /* Letter spacing trails after the last letter too; this centres the word. */
+  padding-left: 0.18em;
+  color: var(--accent);
+  text-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+  white-space: nowrap;
+}
+
+/* Solo has no code to show, just who you are up against. */
+.room-code.is-words {
+  font-size: clamp(17px, 3.6vw, 22px);
+  letter-spacing: 0.04em;
+  padding-left: 0;
+  font-style: italic;
+  font-weight: 400;
+  color: var(--ink-title);
+}
+
+.room-centre .ghost-button {
+  pointer-events: auto;
+  margin-top: 4px;
+  background: rgba(18, 16, 15, 0.7);
+  color: var(--accent);
+  border-color: rgba(205, 184, 148, 0.35);
+}
+
+.room-footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 calc(20px + var(--safe-right)) calc(18px + var(--safe-bottom))
+    calc(20px + var(--safe-left));
+}
+
+.room-count {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+}
+
+.room-count-number {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 28px;
+  line-height: 1.1;
+  color: var(--ink-title);
+  font-variant-numeric: tabular-nums;
+}
+
+.room-status {
+  flex: 1;
+  margin: 0;
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 15px;
+  color: #a39d92;
+  text-align: center;
+}
+
+.room-start.primary-button {
+  width: auto;
+  flex: 0 0 auto;
+  min-width: 160px;
+}
+
+.primary-button:disabled {
+  cursor: not-allowed;
+  filter: saturate(0.4) brightness(0.65);
+  box-shadow: none;
+}
+
+.primary-button:disabled::after {
+  display: none;
+}
+
+@media (max-width: 560px) {
+  .room-footer {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  .room-status {
+    order: 3;
+    flex-basis: 100%;
+    font-size: 14px;
+  }
+
+  .room-start.primary-button {
+    margin-left: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .room {
+    animation: none;
+  }
+}
+
 /* ---------- Game ---------- */
 
 #game {
@@ -486,6 +966,12 @@ select.text-input {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  transition: opacity 0.5s ease;
+}
+
+/* The bars stay out of the way while the pens land and the count runs. */
+#game.is-intro .hud {
+  opacity: 0;
 }
 
 .hud button {
@@ -502,26 +988,95 @@ select.text-input {
 .table-code {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--ink-dim);
+  gap: 10px;
   min-width: 0;
 }
 
 .table-code strong {
-  color: var(--ink);
-  font-size: 17px;
-  letter-spacing: 0.22em;
+  font-family: var(--serif);
+  font-weight: 500;
+  color: var(--accent);
+  font-size: 18px;
+  letter-spacing: 0.2em;
+}
+
+.table-code strong:empty {
+  display: none;
 }
 
 .turn-banner {
   flex: 1;
   text-align: center;
-  font-size: 17px;
-  font-weight: 600;
+  font-family: var(--serif);
+  font-size: 21px;
+  font-weight: 500;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.7);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.turn-clock {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(214, 200, 175, 0.35);
+  background: rgba(18, 16, 15, 0.8);
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  vertical-align: 2px;
+  text-shadow: none;
+}
+
+.turn-clock.is-warning {
+  color: var(--danger);
+  border-color: rgba(240, 120, 106, 0.7);
+  background: rgba(240, 120, 106, 0.16);
+  animation: clock-pulse 1s ease-in-out infinite;
+}
+
+@keyframes clock-pulse {
+  50% {
+    transform: scale(1.07);
+  }
+}
+
+/* The scoreboard: one glass panel down the side of the table. */
+.player-panel {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  width: 240px;
+  max-width: 100%;
+  padding: 12px 10px 10px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(18, 16, 15, 0.82);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--glass-shadow);
+}
+
+.player-panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 6px 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid rgba(214, 200, 175, 0.14);
+}
+
+.player-count {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 13px;
+  color: #a39d92;
   white-space: nowrap;
 }
 
@@ -531,30 +1086,112 @@ select.text-input {
   list-style: none;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  flex: 0 0 auto;
+  align-items: stretch;
+  gap: 3px;
+  max-height: 60dvh;
+  overflow-y: auto;
 }
 
 .player {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 10px;
-  border-radius: 999px;
-  background: rgba(12, 14, 18, 0.55);
-  font-size: 13px;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: 11px;
   border: 1px solid transparent;
-  max-width: 100%;
+  font-size: 13px;
+  min-width: 0;
+  transition: border-color 0.3s ease, background 0.3s ease, opacity 0.3s ease;
 }
 
 .player.is-turn {
-  border-color: var(--line);
-  background: rgba(12, 14, 18, 0.85);
+  border-color: rgba(205, 184, 148, 0.42);
+  background: rgba(205, 184, 148, 0.09);
+}
+
+/* The same ring as the seats in the waiting room. */
+.player-avatar {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(13, 12, 12, 0.9);
+  box-shadow: 0 0 0 2px var(--ring, var(--ink-caption));
+  font-family: var(--serif);
+  font-size: 14px;
+  color: var(--ink-title);
+}
+
+.player.is-turn .player-avatar {
+  box-shadow: 0 0 0 2px var(--ring), 0 0 12px var(--ring);
+}
+
+.player-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.player-wins {
+  flex: 0 0 auto;
+  text-align: right;
+  font-family: var(--serif);
+  font-size: 15px;
+  line-height: 1.1;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.player-wins small {
+  display: block;
+  font-family: var(--font);
+  font-size: 8px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-caption);
+}
+
+/* Someone dealt into the next match, watching this one. */
+.player.is-waiting {
+  border: 1px dashed rgba(214, 200, 175, 0.25);
+  opacity: 0.75;
+}
+
+.player:not(.is-waiting) + .player.is-waiting {
+  margin-top: 6px;
+}
+
+.player.is-waiting .player-avatar {
+  box-shadow: inset 0 0 0 1.5px var(--ink-caption);
+}
+
+/* The turn clock, draining under the row of whoever is on. */
+.chip-clock {
+  position: absolute;
+  left: 48px;
+  right: 10px;
+  bottom: 3px;
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(90deg, var(--accent) 0 calc(var(--left, 1) * 100%), rgba(255, 255, 255, 0.08) 0);
+}
+
+.chip-clock.is-warning {
+  background: linear-gradient(90deg, var(--danger) 0 calc(var(--left, 1) * 100%), rgba(255, 255, 255, 0.08) 0);
+}
+
+.chip-clock[hidden] {
+  display: none;
 }
 
 .player.is-out {
-  opacity: 0.4;
+  opacity: 0.42;
 }
 
 .player.is-out .player-name {
@@ -562,6 +1199,7 @@ select.text-input {
 }
 
 .player-name {
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -571,14 +1209,28 @@ select.text-input {
   flex: 0 0 auto;
   width: 10px;
   height: 10px;
-  border-radius: 3px;
+  border-radius: 50%;
+  box-shadow: 0 0 8px currentColor;
 }
 
 .player-status {
-  color: var(--ink-dim);
-  font-size: 11px;
+  color: var(--ink-caption);
+  font-size: 8.5px;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.2em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-status:empty {
+  display: none;
+}
+
+.player.is-you .player-status,
+.player.is-turn .player-status {
+  color: var(--accent);
 }
 
 /* Pushes the hint and notice to the bottom without absolute positioning, so
@@ -595,7 +1247,10 @@ select.text-input {
 
 .hint {
   margin-top: auto;
-  color: var(--ink-dim);
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 14px;
+  color: #a39d92;
 }
 
 /* The opening-round rule. Sits just above the hint and takes over its job of
@@ -618,9 +1273,9 @@ select.text-input {
   margin-top: 8px;
   padding: 8px 14px;
   border-radius: 999px;
-  background: rgba(255, 107, 107, 0.14);
-  border: 1px solid rgba(255, 107, 107, 0.3);
-  color: #ffc2c2;
+  background: rgba(232, 162, 154, 0.12);
+  border: 1px solid rgba(232, 162, 154, 0.3);
+  color: #f2c6bf;
 }
 
 .overlay {
@@ -629,23 +1284,30 @@ select.text-input {
   display: grid;
   place-items: center;
   padding: 20px;
-  background: rgba(8, 9, 12, 0.66);
-  backdrop-filter: blur(3px);
+  background: rgba(6, 5, 7, 0.6);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
   pointer-events: auto;
+  animation: room-in 0.35s ease both;
 }
 
 .overlay-card {
-  width: min(380px, 100%);
-  padding: 28px;
+  width: min(400px, 100%);
+  padding: 30px 28px 28px;
   text-align: center;
-  background: var(--surface);
+  background: rgba(18, 16, 15, 0.92);
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: 20px;
+  box-shadow: var(--glass-shadow);
+  animation: rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
 .overlay-card h2 {
   margin: 0 0 8px;
-  font-size: clamp(22px, 6vw, 26px);
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: clamp(26px, 7vw, 32px);
+  color: var(--ink-title);
 }
 
 .overlay-card p {
@@ -683,7 +1345,9 @@ select.text-input {
 
 .overlay-place {
   flex: 0 0 2.4em;
-  font-weight: 700;
+  font-family: var(--serif);
+  font-weight: 500;
+  color: var(--accent);
   font-variant-numeric: tabular-nums;
 }
 
@@ -702,6 +1366,47 @@ select.text-input {
   font-variant-numeric: tabular-nums;
 }
 
+/* Online results: the code to read out, and who is waiting to be dealt in. */
+.overlay-invite {
+  margin: 0 0 18px;
+  padding: 14px 16px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 248, 235, 0.03);
+}
+
+.overlay-invite[hidden] {
+  display: none;
+}
+
+.overlay-invite-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.overlay-code {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 26px;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+}
+
+.overlay-card p.overlay-waiting {
+  margin: 8px 0 0;
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 14px;
+  color: #a39d92;
+}
+
+.overlay-card p.overlay-waiting.is-you {
+  color: var(--accent);
+}
+
 .overlay-actions {
   display: flex;
   flex-direction: column;
@@ -715,8 +1420,23 @@ select.text-input {
 /* ---------- Phones ---------- */
 
 @media (max-width: 720px) {
-  .lobby-card {
-    padding: 22px 18px;
+  .lobby-page {
+    padding-left: calc(16px + var(--safe-left));
+    padding-right: calc(16px + var(--safe-right));
+  }
+
+  /* The big title already says it; the small one would just repeat it. */
+  .lobby-mark {
+    display: none;
+  }
+
+  .lobby-modes {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .mode-art {
+    height: 112px;
   }
 
   .hud-top {
@@ -736,17 +1456,62 @@ select.text-input {
     font-size: 15px;
   }
 
-  /* Player chips run across the top rather than down the side: on a portrait
-     screen the table is tall, and a vertical list would run into it. */
+  /* The panel becomes a row of chips across the top: on a portrait screen
+     the table is tall, and a column down the side would run into it. */
+  .player-panel {
+    width: auto;
+    padding: 0;
+    border: 0;
+    background: none;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .player-panel-head,
+  .player-wins,
+  .player-status {
+    display: none;
+  }
+
   .player-list {
     flex-direction: row;
     flex-wrap: wrap;
     gap: 5px;
+    max-height: none;
+    overflow: visible;
   }
 
   .player {
-    padding: 4px 9px;
+    gap: 7px;
+    padding: 3px 11px 3px 3px;
+    border-radius: 999px;
+    border-color: var(--line);
+    background: rgba(18, 16, 15, 0.8);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
     font-size: 12px;
+  }
+
+  .player.is-turn {
+    border-color: rgba(205, 184, 148, 0.6);
+    background: rgba(18, 16, 15, 0.9);
+  }
+
+  .player:not(.is-waiting) + .player.is-waiting {
+    margin-top: 0;
+  }
+
+  .player-avatar {
+    width: 22px;
+    height: 22px;
+    font-size: 11px;
+  }
+
+  .chip-clock {
+    left: 30px;
+    right: 12px;
+    bottom: 2px;
   }
 
   .hint,
@@ -758,23 +1523,25 @@ select.text-input {
 /* ---------- Short screens (a phone held sideways on the lobby) ---------- */
 
 @media (max-height: 540px) {
-  .lobby-card {
-    padding: 18px;
+  .lobby-hero {
+    margin: 12px auto 16px;
   }
 
-  .lobby-card h1 {
-    font-size: 24px;
-    margin-bottom: 2px;
+  .lobby-title {
+    font-size: 34px;
   }
 
   .tagline {
-    margin-bottom: 14px;
+    margin-top: 6px;
     font-size: 13px;
   }
 
-  .lobby-card section {
-    margin-top: 14px;
-    padding-top: 13px;
+  .name-field {
+    margin-top: 12px;
+  }
+
+  .mode-art {
+    display: none;
   }
 
   .section-body {
@@ -811,16 +1578,53 @@ select.text-input {
   /* Held sideways the table is limited by height, which leaves spare width at
      the sides — so the player list goes back to a column and tucks into that
      margin instead of sitting on the table. */
+  .player-panel {
+    width: min(200px, 40vw);
+    padding: 8px 6px 6px;
+  }
+
+  .player-panel-head {
+    display: none;
+  }
+
   .player-list {
     flex-direction: column;
     flex-wrap: nowrap;
-    gap: 4px;
-    max-width: 40vw;
+    gap: 2px;
+    max-height: 70dvh;
+    overflow-y: auto;
   }
 
   .player {
-    padding: 3px 8px;
+    gap: 7px;
+    padding: 3px 6px;
     font-size: 11px;
+    border-radius: 9px;
+    background: none;
+    border-color: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .player.is-turn {
+    border-color: rgba(205, 184, 148, 0.42);
+    background: rgba(205, 184, 148, 0.09);
+  }
+
+  .player-avatar {
+    width: 22px;
+    height: 22px;
+    font-size: 11px;
+  }
+
+  .player-wins,
+  .player-status {
+    display: none;
+  }
+
+  .chip-clock {
+    left: 36px;
+    bottom: 1px;
   }
 
   .overlay-card {
@@ -833,8 +1637,17 @@ select.text-input {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .turn-clock.is-warning {
+    animation: none;
+  }
+
   .overlay {
     backdrop-filter: none;
+  }
+
+  .mode-card,
+  .how-to {
+    animation: none;
   }
 }
 

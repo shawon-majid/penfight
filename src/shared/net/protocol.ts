@@ -178,6 +178,20 @@ export type ClientMessage =
 /** Games won at this table so far, by player id. Outlives any one match. */
 export type WinTally = Record<string, number>;
 
+/** How long a player has to take their shot at an online table. */
+export const TURN_SECONDS = 45;
+/**
+ * Extra time on the first turn of each match, covering the countdown every
+ * player watches before anyone can aim.
+ */
+export const FIRST_TURN_GRACE_SECONDS = 5;
+
+/** Someone who arrived mid-match and will be dealt in when the next one starts. */
+export interface WaitingPlayer {
+  id: string;
+  name: string;
+}
+
 /** Table -> browser. */
 export type ServerMessage =
   /** Sent once on connect: who you are, and the state of the table. */
@@ -190,9 +204,19 @@ export type ServerMessage =
       version: number;
       /** True when the server recognised your account, so this table's games count. */
       signedIn: boolean;
+      /** The server's clock when this was sent, so `turnEndsAt` can be read on any device's clock. */
+      serverNow?: number;
+      waiting?: WaitingPlayer[];
     }
   /** Full authoritative state. Snap to this. */
-  | { type: 'snapshot'; snapshot: MatchSnapshot; hostId: string; wins: WinTally }
+  | {
+      type: 'snapshot';
+      snapshot: MatchSnapshot;
+      hostId: string;
+      wins: WinTally;
+      serverNow?: number;
+      waiting?: WaitingPlayer[];
+    }
   /** Somebody flicked. Replay it locally and animate. */
   | { type: 'strike'; playerId: string; strike: Strike; turnNumber: number }
   /** A turn was passed over without a shot. */

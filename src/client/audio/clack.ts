@@ -88,4 +88,25 @@ export class ClackAudio {
     oscillator.start(now);
     oscillator.stop(now + 0.32);
   }
+
+  /** A quiet clock tick, once a second as a turn runs out. */
+  tick(): void {
+    const context = this.context;
+    if (!context || this.muted || context.state !== 'running') return;
+
+    const now = context.currentTime;
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(1500, now);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.05, now + 0.003);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.05);
+
+    oscillator.connect(gain).connect(context.destination);
+    oscillator.start(now);
+    oscillator.stop(now + 0.06);
+  }
 }

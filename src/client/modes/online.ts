@@ -15,7 +15,7 @@ import type { Match } from '../../shared/game/match';
 import { createMatch, skipTurn, submitStrike } from '../../shared/game/match';
 import type { Strike } from '../../shared/game/strike';
 import { stepMatch } from '../../shared/game/match';
-import type { ServerMessage, WinTally } from '../../shared/net/protocol';
+import type { ServerMessage, WaitingPlayer, WinTally } from '../../shared/net/protocol';
 import { applySnapshot } from '../../shared/net/protocol';
 import { PROTOCOL_VERSION } from '../../shared/net/protocol';
 import { RoomClient, localPlayerId, type ConnectionStatus } from '../net/room-client';
@@ -39,6 +39,15 @@ export class OnlineSession implements Session {
   wins: WinTally = {};
   /** Wall-clock ms by which the current player must shoot, if the server set one. */
   turnEndsAt: number | null = null;
+  /**
+   * The same deadline on this page's own clock (`performance.now()` ms), so a
+   * device whose clock is a few seconds out still counts down correctly.
+   */
+  turnDeadline: number | null = null;
+  /** People who joined mid-match and will be dealt into the next one. */
+  waiting: WaitingPlayer[] = [];
+  /** The last turn that was passed over, and when, so the display can say so. */
+  lastSkip: { playerId: string; reason: 'timeout' | 'disconnected'; at: number } | null = null;
 
   private readonly emitter = new ChangeEmitter();
   private readonly client: RoomClient;
@@ -122,6 +131,17 @@ export class OnlineSession implements Session {
     this.emitter.emit();
   }
 
+  /** True while you are queued for the next match rather than playing this one. */
+  get isWaiting(): boolean {
+    return this.waiting.some((player) => player.id === this.youAre);
+  }
+
+  private readClock(turnEndsAt: number | null, serverNow: number | undefined): void {
+    this.turnEndsAt = turnEndsAt;
+    this.turnDeadline =
+      turnEndsAt === null ? null : performance.now() + (turnEndsAt - (serverNow ?? Date.now()));
+  }
+
   private handle(message: ServerMessage): void {
     switch (message.type) {
       case 'welcome': {
@@ -134,7 +154,8 @@ export class OnlineSession implements Session {
         this.hostId = message.hostId;
         this.wins = message.wins ?? {};
         applySnapshot(this.match, message.snapshot);
-        this.turnEndsAt = message.snapshot.turnEndsAt;
+        this.readClock(message.snapshot.turnEndsAt, message.serverNow);
+        this.waiting = message.waiting ?? [];
         this.notice =
           this.expectSignedIn && !message.signedIn
             ? 'Could not confirm your sign-in, so games here will not count on your profile.'
@@ -146,7 +167,8 @@ export class OnlineSession implements Session {
         this.hostId = message.hostId;
         this.wins = message.wins ?? {};
         applySnapshot(this.match, message.snapshot);
-        this.turnEndsAt = message.snapshot.turnEndsAt;
+        this.readClock(message.snapshot.turnEndsAt, message.serverNow);
+        this.waiting = message.waiting ?? [];
         // Everything before this point is settled; forget the echo bookkeeping.
         this.selfPlayedTurns.clear();
         break;
@@ -164,6 +186,9 @@ export class OnlineSession implements Session {
 
       case 'skipped': {
         skipTurn(this.match);
+        this.lastSkip = { playerId: message.playerId, reason: message.reason, at: performance.now() };
+        // The next player's clock arrives with the snapshot that follows.
+        this.turnDeadline = null;
         break;
       }
 

@@ -13,7 +13,7 @@ import type { Match } from '../../shared/game/match';
 import { currentPlayer, playerById } from '../../shared/game/match';
 import type { Strike } from '../../shared/game/strike';
 import type { CollisionEvent } from '../../shared/physics/collision';
-import type { WinTally } from '../../shared/net/protocol';
+import type { WaitingPlayer, WinTally } from '../../shared/net/protocol';
 
 export interface FrameEvents {
   collisions: CollisionEvent[];
@@ -39,6 +39,10 @@ export interface Session {
   readonly notice: string | null;
   /** Games won at this table so far, by player id. Survives rematches. */
   readonly wins: Readonly<WinTally>;
+  /** Online: people dealt into the next match, not this one. */
+  readonly waiting?: readonly WaitingPlayer[];
+  /** Online: the last turn passed over without a shot, and when (`performance.now()` ms). */
+  readonly lastSkip?: { playerId: string; reason: 'timeout' | 'disconnected'; at: number } | null;
 
   /** Advance one fixed physics frame. */
   tick(): FrameEvents;

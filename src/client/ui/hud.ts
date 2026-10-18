@@ -10,6 +10,11 @@ import { currentPlayer, inOpeningRound, playerById, standings } from '../../shar
 import { colourFor, type ViewportInsets } from '../render/theme';
 import type { Session } from '../modes/session';
 import { strikeablePen } from '../modes/session';
+import { inviteButton } from './invite';
+import type { TurnClock } from '../render/renderer';
+
+/** How long "Time's up" stays in the turn banner. */
+const SKIP_NOTE_MS = 2400;
 
 export interface HudCallbacks {
   onRematch: () => void;
@@ -21,10 +26,22 @@ export class Hud {
   private readonly root: HTMLElement;
   private readonly callbacks: HudCallbacks;
 
+  private readonly codeCaption = document.createElement('span');
   private readonly codeLabel = document.createElement('strong');
   private readonly copyButton = document.createElement('button');
   private readonly turnBanner = document.createElement('div');
+  private readonly turnText = document.createElement('span');
+  private readonly turnClock = document.createElement('span');
+  /** The thin bar under the chip of whoever is on, draining with their clock. */
+  private clockBar: HTMLElement | null = null;
+  private shownSeconds: number | null = null;
+  /** The skip being announced in the banner, until it times out. */
+  private showingSkip: number | null = null;
+  private session: Session | null = null;
   private readonly noticeBar = document.createElement('div');
+  /** The scoreboard: a glass panel down the side, or a row of chips on a phone. */
+  private readonly playerPanel = document.createElement('section');
+  private readonly playerCount = document.createElement('span');
   private readonly playerList = document.createElement('ul');
   private readonly hint = document.createElement('div');
   /** The opening-round rule, and which pens it just saved. */
@@ -36,11 +53,16 @@ export class Hud {
   /** The roster in the lobby, the standings at the end. */
   private readonly overlayList = document.createElement('ol');
   private readonly overlayLeave = document.createElement('button');
+  /** The table code and invite on the results, online only. */
+  private readonly overlayInvite = document.createElement('div');
+  private readonly overlayCode = document.createElement('strong');
+  private readonly overlayWaiting = document.createElement('p');
   private readonly leaveButton = document.createElement('button');
 
-  private lastCopiedCode: string | null = null;
+  /** The space kept clear for the display this match, and the screen size it was measured at. */
+  private reserved: ViewportInsets = { top: 0, right: 0, bottom: 0, left: 0 };
+  private reservedFor = '';
   private readonly gestureHint: string;
-  private readonly inviteLabel: string;
 
   constructor(root: HTMLElement, callbacks: HudCallbacks) {
     this.root = root;
@@ -49,7 +71,6 @@ export class Hud {
     this.gestureHint = touch
       ? 'Drag from your pen and let go. Grab a tip to spin it.'
       : 'Grab your pen anywhere along its length, pull back, and let go. Grab a tip to make it spin.';
-    this.inviteLabel = typeof navigator.share === 'function' ? 'Invite' : 'Copy invite';
     this.build();
   }
 
@@ -61,13 +82,11 @@ export class Hud {
 
     const code = document.createElement('div');
     code.className = 'table-code';
-    const codeCaption = document.createElement('span');
-    codeCaption.textContent = 'Table';
+    this.codeCaption.className = 'eyebrow';
     this.copyButton.type = 'button';
     this.copyButton.className = 'ghost-button';
-    this.copyButton.textContent = this.inviteLabel;
-    this.copyButton.addEventListener('click', () => this.copyInvite());
-    code.append(codeCaption, this.codeLabel, this.copyButton);
+    inviteButton(this.copyButton, () => this.codeLabel.textContent ?? '');
+    code.append(this.codeCaption, this.codeLabel, this.copyButton);
 
     this.leaveButton.type = 'button';
     this.leaveButton.className = 'ghost-button';
@@ -75,9 +94,23 @@ export class Hud {
     this.leaveButton.addEventListener('click', () => this.callbacks.onLeave());
 
     this.turnBanner.className = 'turn-banner';
+    this.turnText.className = 'turn-text';
+    this.turnClock.className = 'turn-clock hidden';
+    this.turnClock.setAttribute('role', 'timer');
+    this.turnBanner.append(this.turnText, this.turnClock);
     top.append(code, this.turnBanner, this.leaveButton);
 
+    this.playerPanel.className = 'player-panel';
+    this.playerPanel.setAttribute('aria-label', 'Players');
+    const panelHead = document.createElement('header');
+    panelHead.className = 'player-panel-head';
+    const panelTitle = document.createElement('span');
+    panelTitle.className = 'eyebrow';
+    panelTitle.textContent = 'Players';
+    this.playerCount.className = 'player-count';
+    panelHead.append(panelTitle, this.playerCount);
     this.playerList.className = 'player-list';
+    this.playerPanel.append(panelHead, this.playerList);
     this.noticeBar.className = 'notice';
     this.hint.className = 'hint';
     this.roundNote.className = 'round-note';
@@ -100,12 +133,33 @@ export class Hud {
 
     const overlayCard = document.createElement('div');
     overlayCard.className = 'overlay-card';
-    overlayCard.append(this.overlayTitle, this.overlayList, this.overlayBody, overlayActions);
+    this.overlayInvite.className = 'overlay-invite';
+    const inviteCaption = document.createElement('span');
+    inviteCaption.className = 'eyebrow';
+    inviteCaption.textContent = 'Table';
+    this.overlayCode.className = 'overlay-code';
+    const inviteRow = document.createElement('div');
+    inviteRow.className = 'overlay-invite-row';
+    const invite = document.createElement('button');
+    invite.type = 'button';
+    invite.className = 'ghost-button';
+    inviteButton(invite, () => this.overlayCode.textContent ?? '');
+    inviteRow.append(this.overlayCode, invite);
+    this.overlayWaiting.className = 'overlay-waiting';
+    this.overlayInvite.append(inviteCaption, inviteRow, this.overlayWaiting);
+
+    overlayCard.append(
+      this.overlayTitle,
+      this.overlayList,
+      this.overlayInvite,
+      this.overlayBody,
+      overlayActions,
+    );
     this.overlay.append(overlayCard);
 
     this.root.append(
       top,
-      this.playerList,
+      this.playerPanel,
       this.roundNote,
       this.hint,
       this.noticeBar,
@@ -128,18 +182,17 @@ export class Hud {
     let top = Math.max(0, topBar.bottom - root.top);
     let left = 0;
 
-    // The player list is a row across the top on a phone held upright and a
-    // column down the side when held sideways. Ask which, rather than guess.
+    // The players are a panel down the side on a wide screen and a row of
+    // chips across the top on a phone held upright. Ask which, rather than guess.
     //
-    // The chips are measured, not the list element: the list stretches to its
-    // container, and reserving that would leave a band of dead space beside a
-    // column of short names.
-    const chips = [...this.playerList.children].map((chip) => chip.getBoundingClientRect());
-    if (chips.length > 0) {
-      const isColumn = getComputedStyle(this.playerList).flexDirection.startsWith('column');
-      if (isColumn) {
-        left = Math.max(0, Math.max(...chips.map((chip) => chip.right)) - root.left);
-      } else {
+    // As a row, the chips are measured rather than the list, which stretches
+    // to the full width whatever is in it.
+    const isColumn = getComputedStyle(this.playerList).flexDirection.startsWith('column');
+    if (isColumn) {
+      left = Math.max(0, this.playerPanel.getBoundingClientRect().right - root.left);
+    } else {
+      const chips = [...this.playerList.children].map((chip) => chip.getBoundingClientRect());
+      if (chips.length > 0) {
         top = Math.max(top, Math.max(...chips.map((chip) => chip.bottom)) - root.top);
       }
     }
@@ -153,85 +206,193 @@ export class Hud {
       ? Math.max(0, root.bottom - Math.min(...bottomEdges))
       : 0;
 
-    return { top, right: 0, bottom, left };
+    // Notes come and go during a match — the hint on your turn, the opening
+    // rule until the round ends — and following them would slide the table
+    // around mid-game. So within one match on one screen size the reserved
+    // space only ever grows.
+    const size = `${Math.round(root.width)}x${Math.round(root.height)}`;
+    if (size !== this.reservedFor) {
+      this.reservedFor = size;
+      this.reserved = { top: 0, right: 0, bottom: 0, left: 0 };
+    }
+    // Kept the same on opposite sides, so the table sits in the middle of the
+    // screen rather than the middle of whatever space happens to be left.
+    const across = Math.max(this.reserved.left, left);
+    const down = Math.max(this.reserved.top, top, bottom);
+    this.reserved = { top: down, right: across, bottom: down, left: across };
+    return this.reserved;
+  }
+
+  /** A new match: let the reserved space settle afresh. */
+  resetLayout(): void {
+    this.reservedFor = '';
   }
 
   update(session: Session): void {
+    this.session = session;
     const { match } = session;
-    this.codeLabel.textContent = match.code;
-    this.copyButton.hidden = match.code === 'SOLO';
+    // Solo has no code to share; the bar just says what kind of table it is.
+    const solo = match.code === 'SOLO';
+    this.codeCaption.textContent = solo ? 'Solo' : 'Table';
+    this.codeLabel.textContent = solo ? '' : match.code;
+    this.copyButton.hidden = solo;
 
-    this.renderPlayers(match, session.youAre);
+    this.renderPlayers(match, session);
     this.renderTurn(session);
     this.renderRoundNote(match);
     this.renderNotice(session);
     this.renderOverlay(session);
   }
 
-  private renderPlayers(match: Match, youAre: string | null): void {
+  private renderPlayers(match: Match, session: Session): void {
+    const { youAre } = session;
     this.playerList.replaceChildren();
+    this.clockBar = null;
+    const inPlay = match.phase === 'aiming' || match.phase === 'resolving';
+
+    const standing = match.players.filter((player) => !player.eliminated).length;
+    this.playerCount.textContent = inPlay
+      ? `${standing} of ${match.players.length} left`
+      : `${match.players.length} at the table`;
 
     for (const [index, player] of match.players.entries()) {
-      const item = document.createElement('li');
-      item.className = 'player';
-      if (player.eliminated) item.classList.add('is-out');
-      const inPlay = match.phase === 'aiming' || match.phase === 'resolving';
-      if (index === match.turnIndex && inPlay) {
-        item.classList.add('is-turn');
+      const onTurn = inPlay && index === match.turnIndex;
+      const tags: string[] = [];
+      if (player.eliminated) {
+        tags.push(player.outOnTurn !== null ? `Out \u00b7 turn ${player.outOnTurn + 1}` : 'Out');
+      } else {
+        if (player.id === youAre) tags.push('You');
+        if (player.isBot) tags.push('Bot');
+        if (player.id === session.hostId && match.code !== 'SOLO') tags.push('Host');
+        if (!player.isBot && !player.connected) tags.push('Away');
+        if (onTurn) tags.push(match.phase === 'aiming' ? 'aiming' : 'moving');
       }
 
-      const swatch = document.createElement('span');
-      swatch.className = 'swatch';
-      swatch.style.background = colourFor(player.colourIndex).body;
+      const item = playerRow(
+        player.name,
+        colourFor(player.colourIndex).body,
+        tags.join(' \u00b7 '),
+        session.wins[player.id] ?? 0,
+      );
+      if (player.eliminated) item.classList.add('is-out');
+      if (onTurn) item.classList.add('is-turn');
+      if (player.id === youAre) item.classList.add('is-you');
 
-      const name = document.createElement('span');
-      name.className = 'player-name';
-      name.textContent = player.id === youAre ? `${player.name} (you)` : player.name;
-
-      const status = document.createElement('span');
-      status.className = 'player-status';
-      status.textContent = describeStatus(player);
-
-      item.append(swatch, name, status);
+      if (onTurn && match.phase === 'aiming') {
+        this.clockBar = document.createElement('span');
+        this.clockBar.className = 'chip-clock';
+        this.clockBar.hidden = true;
+        item.append(this.clockBar);
+      }
       this.playerList.append(item);
     }
+
+    // People who arrived mid-match, dealt in when the next one starts.
+    for (const player of session.waiting ?? []) {
+      const tag = player.id === youAre ? 'You \u00b7 next round' : 'Next round';
+      const item = playerRow(player.name, null, tag, null);
+      item.classList.add('is-waiting');
+      this.playerList.append(item);
+    }
+  }
+
+  /**
+   * Every frame: the turn clock, and the brief "time's up" note when a turn is
+   * passed over. Cheap when nothing changed — it only touches the page when the
+   * number of seconds does.
+   */
+  tick(clock: TurnClock | null): void {
+    const session = this.session;
+
+    const skip = session?.lastSkip;
+    const skipFresh = skip && performance.now() - skip.at < SKIP_NOTE_MS;
+    if (skipFresh && session) {
+      // Re-asserted every frame: an update landing just after the skip would
+      // otherwise paint over the note straight away.
+      this.showingSkip = skip.at;
+      const who = playerById(session.match, skip.playerId);
+      const note =
+        skip.reason === 'timeout'
+          ? skip.playerId === session.youAre
+            ? 'Time\u2019s up \u2014 your turn was skipped'
+            : `Time\u2019s up \u2014 ${who ? `${who.name}\u2019s` : 'a'} turn skipped`
+          : `${who?.name ?? 'A player'} is away \u2014 turn skipped`;
+      if (this.turnText.textContent !== note) {
+        this.turnText.textContent = note;
+        this.turnText.style.color = 'var(--danger)';
+      }
+    } else if (this.showingSkip !== null && session) {
+      this.showingSkip = null;
+      this.renderTurn(session);
+    }
+
+    const showClock = clock !== null && this.showingSkip === null;
+    this.turnClock.classList.toggle('hidden', !showClock);
+    if (this.clockBar) this.clockBar.hidden = clock === null;
+    if (!clock) {
+      this.shownSeconds = null;
+      return;
+    }
+
+    const seconds = Math.ceil(clock.secondsLeft);
+    if (seconds !== this.shownSeconds) {
+      this.shownSeconds = seconds;
+      this.turnClock.textContent = `0:${String(seconds).padStart(2, '0')}`;
+      this.turnClock.setAttribute('aria-label', `${seconds} seconds left`);
+      this.turnClock.classList.toggle('is-warning', clock.warning);
+      this.clockBar?.classList.toggle('is-warning', clock.warning);
+    }
+    if (this.clockBar) this.clockBar.style.setProperty('--left', String(clock.fraction));
   }
 
   private renderTurn(session: Session): void {
     const { match } = session;
 
     if (match.phase === 'lobby') {
-      this.turnBanner.textContent = 'Waiting for players';
-      this.hint.textContent = '';
+      this.turnText.textContent = 'Waiting for players';
+      this.showHint(false);
       return;
     }
 
     if (match.phase === 'finished') {
-      this.turnBanner.textContent = 'Game over';
-      this.hint.textContent = '';
+      this.turnText.textContent = 'Game over';
+      this.showHint(false);
       return;
     }
 
     const player = currentPlayer(match);
     if (!player) {
-      this.turnBanner.textContent = '';
+      this.turnText.textContent = '';
       return;
     }
 
     const yours = player.id === session.youAre;
     if (match.phase === 'resolving') {
-      this.turnBanner.textContent = 'Pens are moving…';
+      this.turnText.textContent = 'Pens are moving…';
     } else if (match.turnNumber === 0) {
       // The first player is drawn at random; say so, or it looks like a bug.
-      this.turnBanner.textContent = yours ? 'You go first' : `${player.name} goes first`;
+      this.turnText.textContent = yours ? 'You go first' : `${player.name} goes first`;
     } else {
-      this.turnBanner.textContent = yours ? 'Your turn' : `${player.name} is aiming`;
+      this.turnText.textContent = yours ? 'Your turn' : `${player.name} is aiming`;
     }
-    this.turnBanner.style.color = colourFor(player.colourIndex).accent;
+    this.turnText.style.color = colourFor(player.colourIndex).accent;
 
     // Teach the gesture, but only while it is actually usable. The short form
     // is for phones, where a long line of text eats the screen.
-    this.hint.textContent = strikeablePen(session) ? this.gestureHint : '';
+    this.showHint(strikeablePen(session) !== null);
+    if (session.waiting?.some((player) => player.id === session.youAre)) {
+      this.hint.textContent = 'You\u2019re in the next round \u2014 watch this one.';
+      this.hint.style.visibility = '';
+    }
+  }
+
+  /**
+   * Hidden rather than emptied: the line keeps its space, so the table is laid
+   * out around it from the start and does not shift when your turn comes.
+   */
+  private showHint(visible: boolean): void {
+    this.hint.textContent = this.gestureHint;
+    this.hint.style.visibility = visible ? '' : 'hidden';
   }
 
   private renderRoundNote(match: Match): void {
@@ -276,20 +437,9 @@ export class Hud {
     const hostName = host?.name ?? 'the host';
     this.overlayLeave.textContent = match.code === 'SOLO' ? 'Back to menu' : 'Leave table';
 
+    // Before the game the waiting room has the screen; see ui/room.ts.
     if (match.phase === 'lobby') {
-      this.overlay.classList.remove('hidden');
-      this.overlayTitle.textContent = `Table ${match.code}`;
-      this.renderRoster(match, session);
-      this.overlayBody.textContent =
-        match.players.length < 2
-          ? 'Share the code and wait for someone to join.'
-          : isHost
-            ? `${match.players.length} players ready.`
-            : `Waiting for ${hostName} to start the game.`;
-      this.overlayAction.dataset.action = 'start';
-      this.overlayAction.textContent = 'Start the game';
-      this.overlayAction.hidden = !isHost || match.players.length < 2;
-      this.overlayBody.hidden = !this.overlayBody.textContent;
+      this.overlay.classList.add('hidden');
       return;
     }
 
@@ -311,21 +461,31 @@ export class Hud {
       this.overlayAction.textContent = 'Play again';
       this.overlayAction.hidden = !isHost;
       this.overlayBody.hidden = !this.overlayBody.textContent;
+      this.renderTableInvite(session);
       return;
     }
 
     this.overlay.classList.add('hidden');
   }
 
-  /** Who is at the table, before the game starts. */
-  private renderRoster(match: Match, session: Session): void {
-    this.overlayList.replaceChildren(
-      ...match.players.map((player) => {
-        const tags: string[] = [];
-        if (player.id === session.hostId) tags.push('host');
-        return this.overlayRow(player, session, null, tags.join(' · '));
-      }),
-    );
+  /**
+   * Online, the results also carry the way in: the table code to read out, an
+   * invite to send, and who is already waiting to be dealt in.
+   */
+  private renderTableInvite(session: Session): void {
+    const { match } = session;
+    const solo = match.code === 'SOLO';
+    this.overlayInvite.hidden = solo;
+    if (solo) return;
+    this.overlayCode.textContent = match.code;
+
+    const waiting = session.waiting ?? [];
+    const you = waiting.some((player) => player.id === session.youAre);
+    const names = waiting.map((player) => (player.id === session.youAre ? 'you' : player.name));
+    this.overlayWaiting.textContent = waiting.length
+      ? `Joining next round: ${names.join(', ')}`
+      : 'Share the code to bring more people in.';
+    this.overlayWaiting.classList.toggle('is-you', you);
   }
 
   /** Final places, with each player's wins at this table. */
@@ -357,7 +517,7 @@ export class Hud {
 
     const swatch = document.createElement('span');
     swatch.className = 'swatch';
-    swatch.style.background = colourFor(player.colourIndex).body;
+    swatch.style.background = swatch.style.color = colourFor(player.colourIndex).body;
 
     const name = document.createElement('span');
     name.className = 'overlay-name';
@@ -370,38 +530,45 @@ export class Hud {
     row.append(swatch, name, extra);
     return row;
   }
+}
 
-  /**
-   * Hand the invite over however this device does that.
-   *
-   * On a phone the share sheet is the natural route — one tap into whichever
-   * chat the players are already in. Everywhere else, the clipboard.
-   */
-  private async copyInvite(): Promise<void> {
-    const code = this.codeLabel.textContent ?? '';
-    const invite = `${location.origin}/?table=${code}`;
+/**
+ * One row of the scoreboard: an avatar ring in the player's colour, their name
+ * with what they are up to underneath, and their wins at this table.
+ *
+ * @param colour null for someone not yet dealt in — an empty ring.
+ * @param wins null to leave the column out.
+ */
+function playerRow(name: string, colour: string | null, tags: string, wins: number | null): HTMLLIElement {
+  const item = document.createElement('li');
+  item.className = 'player';
 
-    if (typeof navigator.share === 'function') {
-      try {
-        await navigator.share({ title: 'Pen Fight', text: `Join my table: ${code}`, url: invite });
-        return;
-      } catch {
-        // Cancelled, or sharing is not allowed here. Fall through to copying.
-      }
-    }
+  const avatar = document.createElement('span');
+  avatar.className = 'player-avatar';
+  avatar.textContent = name.trim().charAt(0).toUpperCase() || '?';
+  if (colour) avatar.style.setProperty('--ring', colour);
 
-    try {
-      await navigator.clipboard.writeText(invite);
-      this.copyButton.textContent = 'Copied';
-      this.lastCopiedCode = code;
-      setTimeout(() => {
-        if (this.lastCopiedCode === code) this.copyButton.textContent = this.inviteLabel;
-      }, 1800);
-    } catch {
-      // Clipboard access can be refused; the code is on screen either way.
-      this.copyButton.textContent = 'Copy failed';
-    }
+  const text = document.createElement('span');
+  text.className = 'player-text';
+  const label = document.createElement('span');
+  label.className = 'player-name';
+  label.textContent = name;
+  const status = document.createElement('span');
+  status.className = 'player-status';
+  status.textContent = tags;
+  text.append(label, status);
+  item.append(avatar, text);
+
+  if (wins !== null) {
+    const tally = document.createElement('span');
+    tally.className = 'player-wins';
+    tally.textContent = String(wins);
+    const caption = document.createElement('small');
+    caption.textContent = wins === 1 ? 'win' : 'wins';
+    tally.append(caption);
+    item.append(tally);
   }
+  return item;
 }
 
 /** 1 -> "1st", 2 -> "2nd", 11 -> "11th". */
@@ -409,11 +576,4 @@ function ordinal(n: number): string {
   const teen = n % 100 >= 11 && n % 100 <= 13;
   const suffix = teen ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th';
   return `${n}${suffix}`;
-}
-
-function describeStatus(player: Player): string {
-  if (player.eliminated) return 'out';
-  if (player.isBot) return 'bot';
-  if (!player.connected) return 'away';
-  return '';
 }

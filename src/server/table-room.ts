@@ -44,10 +44,13 @@ import type {
   ClientMessage,
   MatchSnapshot,
   ServerMessage,
+  WaitingPlayer,
   WinTally,
 } from '../shared/net/protocol';
 import {
+  FIRST_TURN_GRACE_SECONDS,
   PROTOCOL_VERSION,
+  TURN_SECONDS,
   decodeClientMessage,
   encode,
   restoreMatch,
@@ -56,7 +59,6 @@ import {
 import { accountIdOf, acceptedSubprotocol, saveOnlineMatch, type SupabaseEnv } from './supabase';
 
 /** How long a player has to take their shot before the table moves on. */
-const TURN_SECONDS = 45;
 /** Small cushion so browsers finish their animation before the snapshot lands. */
 const SETTLE_BUFFER_MS = 250;
 /** Cap on how long a single shot may be simulated for. */
@@ -78,6 +80,13 @@ export class TableRoom implements DurableObject {
   private code = '';
   /** Everyone who has taken a seat, in join order. */
   private seats = new Map<string, Seat>();
+  /**
+   * People who arrived after the match was dealt. They watch this one and are
+   * dealt into the next, in the order they came.
+   */
+  private waiting = new Map<string, Seat>();
+  /** Connections with no seat at all — the table was full. They still watch. */
+  private spectators = new Set<WebSocket>();
   /** The live match, or null while the table is still filling up. */
   private match: Match | null = null;
   private hostId: string | null = null;
@@ -146,8 +155,10 @@ export class TableRoom implements DurableObject {
     const seat = this.claimSeat(playerId, name, colourIndex);
     if (seat) {
       seat.sockets.add(socket);
-      if (this.match) setConnected(this.match, playerId, true);
+      if (this.match && this.seats.has(playerId)) setConnected(this.match, playerId, true);
       this.hostId ??= playerId;
+    } else {
+      this.spectators.add(socket);
     }
 
     socket.addEventListener('message', (event) => {
@@ -167,6 +178,8 @@ export class TableRoom implements DurableObject {
       wins: { ...this.wins },
       version: PROTOCOL_VERSION,
       signedIn: accountIdOf(playerId) !== null,
+      serverNow: Date.now(),
+      waiting: this.waitingList(),
     });
     this.broadcastSnapshot();
   }
@@ -186,15 +199,37 @@ export class TableRoom implements DurableObject {
       return existing;
     }
 
-    // Once a match is under way the seats are fixed; latecomers spectate.
-    if (this.match || this.seats.size >= MAX_PLAYERS) return null;
+    const waiting = this.waiting.get(playerId);
+    if (waiting) {
+      waiting.spec.name = name;
+      waiting.spec.colourIndex = colourIndex;
+      return waiting;
+    }
+
+    // Seats count everyone dealt in and everyone queued for the next match.
+    if (this.seats.size + this.waiting.size >= MAX_PLAYERS) return null;
 
     const seat: Seat = { spec: { id: playerId, name, colourIndex }, sockets: new Set() };
-    this.seats.set(playerId, seat);
+    // Once a match is under way its seats are fixed; latecomers wait for the next.
+    if (this.match) this.waiting.set(playerId, seat);
+    else this.seats.set(playerId, seat);
     return seat;
   }
 
   private onClose(socket: WebSocket, playerId: string): void {
+    this.spectators.delete(socket);
+
+    const queued = this.waiting.get(playerId);
+    if (queued) {
+      queued.sockets.delete(socket);
+      if (queued.sockets.size > 0) return;
+      // Gone before their match began: they give up their place in the queue.
+      this.waiting.delete(playerId);
+      if (this.hostId === playerId) this.hostId = this.firstConnectedSeat();
+      this.broadcastSnapshot();
+      return;
+    }
+
     const seat = this.seats.get(playerId);
     if (!seat) return;
     seat.sockets.delete(socket);
@@ -215,8 +250,9 @@ export class TableRoom implements DurableObject {
     this.persist();
   }
 
+  /** The next host: the longest-seated player still connected, then whoever is waiting. */
   private firstConnectedSeat(): string | null {
-    for (const [id, seat] of this.seats) {
+    for (const [id, seat] of [...this.seats, ...this.waiting]) {
       if (seat.sockets.size > 0) return id;
     }
     return null;
@@ -260,7 +296,7 @@ export class TableRoom implements DurableObject {
     }
 
     this.match = this.dealMatch();
-    this.armTurnTimer();
+    this.armTurnTimer(FIRST_TURN_GRACE_SECONDS);
     this.broadcastSnapshot();
     this.persist();
   }
@@ -272,13 +308,17 @@ export class TableRoom implements DurableObject {
     }
     if (this.match && this.match.phase !== 'finished') return;
 
-    // Drop anyone who left, then deal again.
+    // Drop anyone who left, bring in everyone who has been waiting, then deal again.
     for (const [id, seat] of [...this.seats]) {
       if (seat.sockets.size === 0) this.seats.delete(id);
     }
+    for (const [id, seat] of this.waiting) {
+      if (seat.sockets.size > 0 && this.seats.size < MAX_PLAYERS) this.seats.set(id, seat);
+    }
+    this.waiting.clear();
     this.clearTimers();
     this.match = this.seats.size >= MIN_PLAYERS ? this.dealMatch() : null;
-    if (this.match) this.armTurnTimer();
+    if (this.match) this.armTurnTimer(FIRST_TURN_GRACE_SECONDS);
     this.broadcastSnapshot();
     this.persist();
   }
@@ -366,7 +406,7 @@ export class TableRoom implements DurableObject {
    * Nobody should be able to freeze a ten-person table by wandering off, so a
    * turn that is never taken is passed on automatically.
    */
-  private armTurnTimer(): void {
+  private armTurnTimer(graceSeconds = 0): void {
     this.clearTurnTimer();
     const match = this.match;
     if (!match || match.phase !== 'aiming') return;
@@ -374,7 +414,8 @@ export class TableRoom implements DurableObject {
     const player = currentPlayer(match);
     if (!player) return;
 
-    this.turnEndsAt = Date.now() + TURN_SECONDS * 1000;
+    const allowedMs = (TURN_SECONDS + graceSeconds) * 1000;
+    this.turnEndsAt = Date.now() + allowedMs;
     this.turnTimer = setTimeout(() => {
       this.turnTimer = null;
       if (!this.match || this.match.phase !== 'aiming') return;
@@ -390,7 +431,7 @@ export class TableRoom implements DurableObject {
       });
       this.armTurnTimer();
       this.broadcastSnapshot();
-    }, TURN_SECONDS * 1000);
+    }, allowedMs);
   }
 
   private clearTurnTimer(): void {
@@ -431,22 +472,38 @@ export class TableRoom implements DurableObject {
       snapshot: this.snapshot(),
       hostId: this.hostId ?? '',
       wins: { ...this.wins },
+      serverNow: Date.now(),
+      waiting: this.waitingList(),
     };
+  }
+
+  private waitingList(): WaitingPlayer[] {
+    return [...this.waiting.values()]
+      .filter((seat) => seat.sockets.size > 0)
+      .map((seat) => ({ id: seat.spec.id, name: seat.spec.name }));
   }
 
   private broadcastSnapshot(): void {
     this.broadcast(this.snapshotMessage());
   }
 
+  /** To everyone connected: seated, waiting for the next match, or just watching. */
   private broadcast(message: ServerMessage): void {
     const payload = encode(message);
-    for (const seat of this.seats.values()) {
+    for (const seat of [...this.seats.values(), ...this.waiting.values()]) {
       for (const socket of seat.sockets) {
         try {
           socket.send(payload);
         } catch {
           seat.sockets.delete(socket);
         }
+      }
+    }
+    for (const socket of this.spectators) {
+      try {
+        socket.send(payload);
+      } catch {
+        this.spectators.delete(socket);
       }
     }
   }
