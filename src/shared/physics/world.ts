@@ -6,29 +6,26 @@
  * `step(dt)` calls and they stay in lockstep, which is what lets the browser
  * animate a shot locally while the server independently confirms it.
  *
+ * Each frame is split into engine steps (`tuning.engineStepsPerFrame`). Every
+ * engine step runs table friction on the plain pen data, hands the pens to the
+ * physics engine to move and collide (`engine.ts`), and reads them back.
+ *
  * Nothing in here knows about players, turns or winning — that lives in
- * `game/match.ts`. This module only knows about pens on a rectangle.
+ * `game/match.ts`. This module only knows about pens on a table.
  */
 
 import type { CollisionEvent } from './collision';
-import { findContacts, resolveContact } from './collision';
+import { pullFromEngine, pushToEngine, resetEngine, stepEngine, takeHits } from './engine';
 import { applyTableFriction, arrestIfCreeping } from './friction';
 import type { Pen, PenSpawn } from './pen';
-import { clampMotion, clonePen, createPen, maxPointSpeed, stopPen } from './pen';
+import { clonePen, createPen, stopPen } from './pen';
 import type { Table } from './table';
 import { DEFAULT_TABLE, isOverEdge } from './table';
 import { DEFAULT_TUNING, type Tuning } from './tuning';
 
-/** How many times per second the physics advances. Fixed, on every machine. */
+/** How many times per second the game advances. Fixed, on every machine. */
 export const SIM_HZ = 60;
 export const SIM_STEP = 1 / SIM_HZ;
-
-/**
- * Contacts are resolved more than once per sub-step. One pass is enough for an
- * isolated hit, but in a crowd resolving A-B can push A back into C, and the
- * extra passes let that settle out.
- */
-const CONTACT_ITERATIONS = 3;
 
 export interface World {
   table: Table;
@@ -36,14 +33,14 @@ export interface World {
   pens: Pen[];
   /** Seconds simulated since the last strike. Used for the turn timeout. */
   elapsed: number;
-  /** Consecutive still sub-steps, counting towards "the table has settled". */
+  /** Consecutive still frames, counting towards "the table has settled". */
   restSteps: number;
 }
 
 export interface StepResult {
   /** True once nothing is moving and no pen is mid-fall. */
   settled: boolean;
-  /** Hits resolved this step, for sound and sparks. */
+  /** Hits this frame, for sound and sparks. */
   collisions: CollisionEvent[];
   /** Pens that went over the edge this step. */
   startedFalling: string[];
@@ -59,12 +56,16 @@ export function createWorld(
   return {
     table,
     tuning,
-    pens: spawns.map((spawn) => createPen(spawn, tuning)),
+    pens: spawns.map((spawn) => createPen(spawn)),
     elapsed: 0,
     restSteps: 0,
   };
 }
 
+/**
+ * A copy that can be stepped on its own. The engine is not copied: the copy
+ * builds a fresh one on its first step, from the pens' plain state.
+ */
 export function cloneWorld(world: World): World {
   return {
     table: { ...world.table },
@@ -83,19 +84,21 @@ export function livePens(world: World): Pen[] {
   return world.pens.filter((pen) => pen.state === 'onTable');
 }
 
-/** Reset the settle bookkeeping. Call this whenever a new strike goes in. */
+/**
+ * Reset the settle bookkeeping and start the engine afresh. Call this whenever
+ * a new strike goes in.
+ *
+ * The fresh engine is what makes a shot reproducible anywhere: its outcome
+ * depends only on where the pens are, never on what the engine happened to
+ * remember from the last shot.
+ */
 export function beginTurn(world: World): void {
   world.elapsed = 0;
   world.restSteps = 0;
+  resetEngine(world);
 }
 
-/**
- * Advance the world by one fixed frame.
- *
- * A frame is broken into sub-steps small enough that no pen travels further
- * than a fraction of its own thickness, otherwise a fast pen could pass clean
- * through another between two samples.
- */
+/** Advance the world by one fixed frame. */
 export function step(world: World): StepResult {
   const result: StepResult = {
     settled: false,
@@ -104,90 +107,45 @@ export function step(world: World): StepResult {
     finishedFalling: [],
   };
 
-  const subSteps = chooseSubStepCount(world);
-  const dt = SIM_STEP / subSteps;
+  const steps = Math.max(1, Math.round(world.tuning.engineStepsPerFrame));
+  const dt = SIM_STEP / steps;
+  for (let i = 0; i < steps; i++) advance(world, dt, result);
 
-  for (let i = 0; i < subSteps; i++) {
-    advance(world, dt, result);
-  }
-
+  result.collisions = takeHits(world, world.tuning.minHitImpulse);
   world.elapsed += SIM_STEP;
   result.settled = isSettled(world, result);
   return result;
-}
-
-/**
- * Pick a sub-step count from the fastest thing on the table.
- *
- * Derived only from world state, so every machine picks the same number and
- * the simulation stays reproducible.
- */
-function chooseSubStepCount(world: World): number {
-  let fastest = 0;
-  for (const pen of world.pens) {
-    if (pen.state !== 'onTable') continue;
-    const speed = maxPointSpeed(pen);
-    if (speed > fastest) fastest = speed;
-  }
-
-  if (fastest <= 0) return 1;
-
-  const { tuning } = world;
-  const safeDistance = tuning.penRadius * tuning.maxTravelPerStepInRadii;
-  const safeDt = Math.min(tuning.maxSubStep, safeDistance / fastest);
-  const needed = Math.ceil(SIM_STEP / safeDt);
-  return Math.max(1, Math.min(tuning.maxSubStepsPerFrame, needed));
 }
 
 function advance(world: World, dt: number, result: StepResult): void {
   const { tuning } = world;
 
   // 1. The table drags on everything touching it.
-  for (const pen of world.pens) {
-    applyTableFriction(pen, dt, tuning);
-    clampMotion(pen, tuning);
-  }
+  for (const pen of world.pens) applyTableFriction(pen, dt, tuning);
 
-  // 2. Move.
+  // 2. Move and collide.
+  pushToEngine(world);
+  stepEngine(world, dt);
+  pullFromEngine(world);
+
+  // 3. Pens already over the edge keep falling; anything newly past it starts.
   for (const pen of world.pens) {
-    if (pen.state === 'onTable') {
-      pen.x += pen.vx * dt;
-      pen.y += pen.vy * dt;
-      pen.angle += pen.omega * dt;
-    } else if (pen.state === 'falling') {
+    if (pen.state === 'falling') {
       advanceFall(pen, dt, tuning, result);
-    }
-  }
-
-  // 3. Sort out anything that now overlaps.
-  for (let iteration = 0; iteration < CONTACT_ITERATIONS; iteration++) {
-    const contacts = findContacts(world.pens);
-    if (contacts.length === 0) break;
-    for (const contact of contacts) {
-      const event = resolveContact(contact, tuning);
-      // Only report a hit the first time round, or one clack becomes three.
-      if (event && iteration === 0) result.collisions.push(event);
-    }
-  }
-
-  // 4. Anything past the edge starts to fall.
-  for (const pen of world.pens) {
-    if (pen.state === 'onTable' && isOverEdge(pen, world.table)) {
+    } else if (pen.state === 'onTable' && isOverEdge(pen, world.table)) {
       pen.state = 'falling';
       pen.fallProgress = 0;
       result.startedFalling.push(pen.id);
     }
   }
 
-  // 5. Let slow crawlers stop, so turns end promptly.
-  for (const pen of world.pens) {
-    arrestIfCreeping(pen, tuning);
-  }
+  // 4. Let slow crawlers stop, so turns end promptly.
+  for (const pen of world.pens) arrestIfCreeping(pen, tuning);
 }
 
 /**
  * A falling pen keeps its momentum and carries on off the edge, purely for the
- * look of it. It no longer collides — `findContact` ignores it.
+ * look of it. It no longer collides: the engine drops its body.
  */
 function advanceFall(pen: Pen, dt: number, tuning: Tuning, result: StepResult): void {
   pen.x += pen.vx * dt;
@@ -230,7 +188,13 @@ function isSettled(world: World, result: StepResult): boolean {
   }
 
   world.restSteps += 1;
-  return world.restSteps >= world.tuning.restStepsRequired;
+  if (world.restSteps < world.tuning.restStepsRequired) return false;
+
+  // Settled: make "still" exactly still, so the next shot starts clean.
+  for (const pen of world.pens) {
+    if (pen.state === 'onTable') stopPen(pen);
+  }
+  return true;
 }
 
 /** Run until the table settles. Used by the server and by the bots' lookahead. */

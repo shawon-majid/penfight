@@ -1,16 +1,23 @@
 /**
- * A pen: a rigid capsule sliding flat on a table.
+ * A pen: a rigid barrel sliding flat on a table.
  *
- * The barrel is modelled as a line segment of length `length` with a rounded
- * cap of `radius` at each end. That shape is what makes the game interesting —
- * it has a real orientation, so *where* you hit it decides how much it spins.
+ * This is the plain-data half of a pen — the part that is saved, sent over the
+ * network and read by the renderer. The physics engine keeps its own body for
+ * each pen (see `engine.ts`) and copies its results back here every step, so
+ * nothing outside `physics/` ever needs to know the engine exists.
+ *
+ * `x`, `y` is the middle of the barrel, which is what you draw around. The
+ * centre of mass sits `comOffset` along the barrel from there, and the
+ * velocities are the velocities *of the centre of mass*, because that is what
+ * momentum is measured at.
  *
  * Bodies are mutable. The solver rewrites them in place many times per frame,
- * and allocating fresh objects per sub-step would dominate the frame budget.
+ * and allocating fresh objects per step would dominate the frame budget.
  * Everything that reads a body treats it as read-only.
  */
 
-import type { Tuning } from './tuning';
+import { resolvePenSpec } from './pens/catalogue';
+import { inertiaOf } from './pens/spec';
 import type { Vec2 } from './vec2';
 import { clamp, cross, fromAngle, vec } from './vec2';
 
@@ -26,22 +33,27 @@ export interface Pen {
   readonly id: string;
   /** Which player owns this pen. Only they may strike it. */
   readonly ownerId: string;
+  /** Which entry in the pen catalogue this is. */
+  readonly specId: string;
 
-  // --- Pose: centre of mass and heading ---
+  // --- Pose: middle of the barrel, and heading ---
   x: number;
   y: number;
   angle: number;
 
-  // --- Motion ---
+  // --- Motion of the centre of mass ---
   vx: number;
   vy: number;
   /** Angular velocity, radians per second, counter-clockwise positive. */
   omega: number;
 
-  // --- Shape and mass (fixed once built) ---
+  // --- Shape and mass (fixed once built, copied from the spec) ---
   readonly length: number;
   readonly radius: number;
   readonly mass: number;
+  /** Distance from the middle of the barrel to the centre of mass, towards the tip. m */
+  readonly comOffset: number;
+  /** About the centre of mass. */
   readonly inertia: number;
   readonly invMass: number;
   readonly invInertia: number;
@@ -55,38 +67,32 @@ export interface Pen {
 export interface PenSpawn {
   id: string;
   ownerId: string;
+  /** Catalogue entry. Unknown or missing means the standard pen. */
+  specId?: string;
   x: number;
   y: number;
   angle: number;
 }
 
-/**
- * Moment of inertia of a flat rectangle about its centre. A capsule is not
- * quite a rectangle, but the barrel dominates and the difference is far below
- * the level anyone can feel.
- */
-function momentOfInertia(mass: number, length: number, radius: number): number {
-  const width = radius * 2;
-  return (mass * (length * length + width * width)) / 12;
-}
-
-export function createPen(spawn: PenSpawn, tuning: Tuning): Pen {
-  const { penLength: length, penRadius: radius, penMass: mass } = tuning;
-  const inertia = momentOfInertia(mass, length, radius);
+export function createPen(spawn: PenSpawn): Pen {
+  const spec = resolvePenSpec(spawn.specId);
+  const inertia = inertiaOf(spec);
   return {
     id: spawn.id,
     ownerId: spawn.ownerId,
+    specId: spec.id,
     x: spawn.x,
     y: spawn.y,
     angle: spawn.angle,
     vx: 0,
     vy: 0,
     omega: 0,
-    length,
-    radius,
-    mass,
+    length: spec.length,
+    radius: spec.radius,
+    mass: spec.mass,
+    comOffset: spec.comOffset,
     inertia,
-    invMass: 1 / mass,
+    invMass: 1 / spec.mass,
     invInertia: 1 / inertia,
     state: 'onTable',
     fallProgress: 0,
@@ -102,11 +108,23 @@ export function penAxis(pen: Pen): Vec2 {
   return fromAngle(pen.angle);
 }
 
+/** The middle of the barrel. */
 export function penCentre(pen: Pen): Vec2 {
   return vec(pen.x, pen.y);
 }
 
-/** The two ends of the capsule's core segment: `[tail, tip]`. */
+/** Where the pen balances. This, not the middle, decides when it falls off. */
+export function penCentreOfMass(pen: Pen): Vec2 {
+  const axis = penAxis(pen);
+  return vec(pen.x + axis.x * pen.comOffset, pen.y + axis.y * pen.comOffset);
+}
+
+/**
+ * The two ends of the barrel's core segment: `[tail, tip]`.
+ *
+ * Together with `radius` this is a capsule around the pen, used for hit tests
+ * and placement. The engine collides the real shape, pointed tip and all.
+ */
 export function penEndpoints(pen: Pen): [Vec2, Vec2] {
   const axis = penAxis(pen);
   const half = pen.length / 2 - pen.radius;
@@ -156,42 +174,37 @@ export function worldToLocal(pen: Pen, point: Vec2): PenLocalPoint {
  * that makes a spinning pen shove a neighbour sideways.
  */
 export function velocityAt(pen: Pen, point: Vec2): Vec2 {
-  const rx = point.x - pen.x;
-  const ry = point.y - pen.y;
+  const com = penCentreOfMass(pen);
+  const rx = point.x - com.x;
+  const ry = point.y - com.y;
   return vec(pen.vx - pen.omega * ry, pen.vy + pen.omega * rx);
 }
 
 /**
- * Apply an impulse at a world point.
- *
- * `spinScale` lets a caller damp only the rotational half of the response.
- * The solver always passes 1 (real physics); the strike code passes
- * `tuning.strikeSpinFactor` so a flick to the tip is lively but readable.
+ * Apply an impulse at a world point. The lever arm from the centre of mass
+ * decides how much of it becomes spin.
  */
-export function applyImpulseAt(
-  pen: Pen,
-  impulse: Vec2,
-  point: Vec2,
-  spinScale = 1,
-): void {
+export function applyImpulseAt(pen: Pen, impulse: Vec2, point: Vec2): void {
+  const com = penCentreOfMass(pen);
   pen.vx += impulse.x * pen.invMass;
   pen.vy += impulse.y * pen.invMass;
-  const lever = vec(point.x - pen.x, point.y - pen.y);
-  pen.omega += cross(lever, impulse) * pen.invInertia * spinScale;
+  pen.omega += cross(vec(point.x - com.x, point.y - com.y), impulse) * pen.invInertia;
 }
 
-/** Keep motion inside the bounds the solver and the eye can both cope with. */
-export function clampMotion(pen: Pen, tuning: Tuning): void {
-  const speed = Math.hypot(pen.vx, pen.vy);
-  if (speed > tuning.maxLinearVelocity) {
-    const k = tuning.maxLinearVelocity / speed;
-    pen.vx *= k;
-    pen.vy *= k;
-  }
-  pen.omega = clamp(pen.omega, -tuning.maxAngularVelocity, tuning.maxAngularVelocity);
+/**
+ * Mass a push along `direction` at `point` meets.
+ *
+ * At the centre of mass this is the pen's mass. Further out more of the push
+ * goes into turning the pen, so it feels lighter: at the very tip of a uniform
+ * rod, a quarter of its mass.
+ */
+export function effectiveMassAt(pen: Pen, point: Vec2, direction: Vec2): number {
+  const com = penCentreOfMass(pen);
+  const lever = cross(vec(point.x - com.x, point.y - com.y), direction);
+  return 1 / (pen.invMass + lever * lever * pen.invInertia);
 }
 
-export function isAtRest(pen: Pen, tuning: Tuning): boolean {
+export function isAtRest(pen: Pen, tuning: { restLinearSpeed: number; restAngularSpeed: number }): boolean {
   if (pen.state !== 'onTable') return pen.state === 'out';
   return (
     Math.hypot(pen.vx, pen.vy) < tuning.restLinearSpeed &&
@@ -203,9 +216,4 @@ export function stopPen(pen: Pen): void {
   pen.vx = 0;
   pen.vy = 0;
   pen.omega = 0;
-}
-
-/** Fastest a point on this pen is currently moving — used for sub-stepping. */
-export function maxPointSpeed(pen: Pen): number {
-  return Math.hypot(pen.vx, pen.vy) + Math.abs(pen.omega) * (pen.length / 2);
 }

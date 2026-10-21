@@ -4,6 +4,11 @@ import { createMatch, stepMatch, submitStrike, type Match } from '../src/shared/
 import { createRng } from '../src/shared/game/rng';
 import { DEFAULT_TABLE } from '../src/shared/physics/table';
 import { DEFAULT_TUNING, tuningWith } from '../src/shared/physics/tuning';
+import { penCentreOfMass, worldToLocal } from '../src/shared/physics/pen';
+import { PEN_CATALOGUE } from '../src/shared/physics/pens/catalogue';
+import { vec } from '../src/shared/physics/vec2';
+import { createWorld, findPen, simulateUntilSettled } from '../src/shared/physics/world';
+import { applyStrike } from '../src/shared/game/strike';
 
 /**
  * Balance, measured rather than guessed.
@@ -88,49 +93,99 @@ describe('match length', () => {
   });
 });
 
-describe('shot range', () => {
-  /** Distance a pen coasts to a stop from `speed`. */
-  const coastingRange = (speed: number) =>
-    (speed * speed) / (2 * DEFAULT_TUNING.tableFriction * DEFAULT_TUNING.gravity);
+/**
+ * How far one flick goes, checked for every pen in the catalogue, by running
+ * the real solver. A new pen that is too strong or too weak fails here.
+ */
+describe('shot range, for every pen', () => {
+  /** Distance a pen travels from the middle of a table too big to fall off. */
+  function flickRange(specId: string, power: number, direction = vec(1, 0)): number {
+    const world = createWorld(
+      [{ id: 'p', ownerId: 'a', specId, x: 0, y: 0, angle: Math.PI / 2 }],
+      { width: 20, height: 20 },
+    );
+    const pen = findPen(world, 'p')!;
+    applyStrike(world, {
+      penId: 'p',
+      contact: worldToLocal(pen, penCentreOfMass(pen)),
+      direction,
+      power,
+    });
+    simulateUntilSettled(world);
+    return Math.hypot(pen.x, pen.y);
+  }
 
-  const fullPowerSpeed = DEFAULT_TUNING.maxStrikeImpulse / DEFAULT_TUNING.penMass;
+  for (const spec of PEN_CATALOGUE) {
+    describe(spec.name, () => {
+      it('carries itself off the table on a full-power miss from the middle', () => {
+        const range = flickRange(spec.id, 1);
+        // Past the nearest edge...
+        expect(range).toBeGreaterThan(DEFAULT_TABLE.height / 2);
+        // ...but not clean across the long side, or every shot would be suicide.
+        expect(range).toBeLessThan(DEFAULT_TABLE.width * 0.9);
+      });
 
-  it('carries your own pen off the table if a full-power shot misses', () => {
-    // Measured from the middle, so half a table in any direction is the edge.
-    const range = coastingRange(fullPowerSpeed);
-    expect(range).toBeGreaterThan(DEFAULT_TABLE.width / 2);
+      it('still makes a real shot at half power', () => {
+        expect(flickRange(spec.id, 0.5)).toBeGreaterThan(spec.length * 2);
+      });
 
-    // But not so far that you can cross the whole table in one — that would
-    // make every shot from your own edge suicide, and stall the game.
-    expect(range / DEFAULT_TABLE.width).toBeLessThan(1.1);
+      it('rolls further side-on than it skids end-on', () => {
+        // The pen lies along y, so a flick along y pushes it end-on.
+        expect(flickRange(spec.id, 1)).toBeGreaterThan(flickRange(spec.id, 1, vec(0, 1)) * 1.5);
+      });
+    });
+  }
+
+  /** How far `target` ends up after `striker` hits it square from 25 cm away. */
+  function hitTravel(strikerId: string, targetId: string, power: number): number {
+    const world = createWorld(
+      [
+        { id: 's', ownerId: 's', specId: strikerId, x: -0.25, y: 0, angle: Math.PI / 2 },
+        { id: 't', ownerId: 't', specId: targetId, x: 0, y: 0, angle: Math.PI / 2 },
+      ],
+      { width: 20, height: 20 },
+    );
+    const pen = findPen(world, 's')!;
+    applyStrike(world, {
+      penId: 's',
+      contact: worldToLocal(pen, penCentreOfMass(pen)),
+      direction: vec(1, 0),
+      power,
+    });
+    simulateUntilSettled(world);
+    return findPen(world, 't')!.x;
+  }
+
+  it('never kills from the middle with a half-power hit, whatever the pens', () => {
+    // A perfect full-power hit can knock a pen off from anywhere, as in a real
+    // pen fight. A moderate one cannot: you have to work somebody outwards.
+    for (const striker of PEN_CATALOGUE) {
+      for (const target of PEN_CATALOGUE) {
+        expect(hitTravel(striker.id, target.id, 0.5), `${striker.id} into ${target.id}`).toBeLessThan(
+          DEFAULT_TABLE.height / 2,
+        );
+      }
+    }
   });
 
-  it('cannot kill from anywhere: a square hit carries the target about half the table', () => {
-    // A square hit between equal masses hands over (1 + restitution) / 2 of
-    // the striker's speed.
-    const handover = (1 + DEFAULT_TUNING.penRestitution) / 2;
-    const targetRange = coastingRange(fullPowerSpeed * handover);
-
-    // Less than centre-to-edge, so a pen in the middle survives a full hit and
-    // has to be worked outwards first.
-    expect(targetRange).toBeLessThan(DEFAULT_TABLE.width / 2);
-    // Still a real shove — more than five pen lengths.
-    expect(targetRange).toBeGreaterThan(DEFAULT_TUNING.penLength * 5);
-  });
-
-  it('is stated in the tuning as a real, checkable relationship', () => {
-    // Guard against someone "just nudging" one number in isolation.
-    const halfPowerRange =
-      (0.5 * DEFAULT_TUNING.maxStrikeImpulse / DEFAULT_TUNING.penMass) ** 2 /
-      (2 * DEFAULT_TUNING.tableFriction * DEFAULT_TUNING.gravity);
-    expect(halfPowerRange).toBeGreaterThan(DEFAULT_TUNING.penLength * 2);
+  it('never sends the target further than the striker would have gone alone', () => {
+    // A hit can only hand on energy it had. If a target ever out-travelled the
+    // striker's own free shot, the solver would be inventing energy.
+    for (const striker of PEN_CATALOGUE) {
+      const alone = flickRange(striker.id, 1);
+      for (const target of PEN_CATALOGUE) {
+        expect(hitTravel(striker.id, target.id, 1), `${striker.id} into ${target.id}`).toBeLessThan(
+          alone,
+        );
+      }
+    }
   });
 });
 
 describe('tuning overrides', () => {
   it('changes only what was asked for', () => {
-    const slippery = tuningWith({ tableFriction: 0.05 });
-    expect(slippery.tableFriction).toBe(0.05);
-    expect(slippery.penMass).toBe(DEFAULT_TUNING.penMass);
+    const gentle = tuningWith({ maxFlickSpeed: 1 });
+    expect(gentle.maxFlickSpeed).toBe(1);
+    expect(gentle.gravity).toBe(DEFAULT_TUNING.gravity);
   });
 });

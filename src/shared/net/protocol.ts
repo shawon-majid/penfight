@@ -22,6 +22,8 @@ import { createPen } from '../physics/pen';
 import type { Table } from '../physics/table';
 import { DEFAULT_TUNING, type Tuning } from '../physics/tuning';
 import { createWorld, type World } from '../physics/world';
+import { resetEngine } from '../physics/engine';
+import { resolvePenSpec } from '../physics/pens/catalogue';
 import type { Match, MatchPhase, Player } from '../game/match';
 import type { Strike } from '../game/strike';
 
@@ -43,6 +45,8 @@ export const TOKEN_SUBPROTOCOL_PREFIX = 'penfight.token.';
 export interface PenSnapshot {
   id: string;
   ownerId: string;
+  /** Catalogue pen. Missing from tables saved before there was more than one. */
+  specId?: string;
   x: number;
   y: number;
   angle: number;
@@ -73,6 +77,7 @@ export function snapshotPen(pen: Pen): PenSnapshot {
   return {
     id: pen.id,
     ownerId: pen.ownerId,
+    specId: pen.specId,
     x: pen.x,
     y: pen.y,
     angle: pen.angle,
@@ -104,22 +109,22 @@ export function snapshotMatch(match: Match, turnEndsAt: number | null = null): M
 /**
  * Rebuild a playable match from a snapshot.
  *
- * Mass and inertia are recomputed from tuning rather than sent, so they can
- * never disagree between two builds of the game.
+ * Shape, mass and grip are looked up from the pen catalogue by `specId`
+ * rather than sent, so they can never disagree between two builds of the game,
+ * and a client cannot send itself a heavier pen. An unknown id gets the
+ * standard pen.
  */
 export function restoreMatch(snapshot: MatchSnapshot, tuning: Tuning = DEFAULT_TUNING): Match {
   const world: World = createWorld([], snapshot.table, tuning);
   world.pens = snapshot.pens.map((penSnapshot) => {
-    const pen = createPen(
-      {
-        id: penSnapshot.id,
-        ownerId: penSnapshot.ownerId,
-        x: penSnapshot.x,
-        y: penSnapshot.y,
-        angle: penSnapshot.angle,
-      },
-      tuning,
-    );
+    const pen = createPen({
+      id: penSnapshot.id,
+      ownerId: penSnapshot.ownerId,
+      specId: penSnapshot.specId,
+      x: penSnapshot.x,
+      y: penSnapshot.y,
+      angle: penSnapshot.angle,
+    });
     pen.vx = penSnapshot.vx;
     pen.vy = penSnapshot.vy;
     pen.omega = penSnapshot.omega;
@@ -131,8 +136,12 @@ export function restoreMatch(snapshot: MatchSnapshot, tuning: Tuning = DEFAULT_T
   return {
     code: snapshot.code,
     phase: snapshot.phase,
-    // `outOnTurn` is missing from tables saved by an older server.
-    players: snapshot.players.map((player) => ({ ...player, outOnTurn: player.outOnTurn ?? null })),
+    // `outOnTurn` and `penSpecId` are missing from tables saved by an older server.
+    players: snapshot.players.map((player) => ({
+      ...player,
+      outOnTurn: player.outOnTurn ?? null,
+      penSpecId: resolvePenSpec(player.penSpecId).id,
+    })),
     world,
     turnIndex: snapshot.turnIndex,
     turnNumber: snapshot.turnNumber,
@@ -154,6 +163,8 @@ export function applySnapshot(match: Match, snapshot: MatchSnapshot): void {
   match.world.table = restored.world.table;
   match.world.elapsed = 0;
   match.world.restSteps = 0;
+  // The pens are new objects; the engine must not carry anything over.
+  resetEngine(match.world);
   match.turnIndex = restored.turnIndex;
   match.turnNumber = restored.turnNumber;
   match.winnerId = restored.winnerId;

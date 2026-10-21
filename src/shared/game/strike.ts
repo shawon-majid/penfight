@@ -10,19 +10,25 @@
  * Grab the middle and pull straight back and the pen leaves in a straight
  * line. Grab a tip and the same pull puts most of its energy into spin, so the
  * pen wheels away and sweeps a much wider path. Nothing special-cases that —
- * it is what `applyImpulseAt` does with a lever arm.
+ * it falls out of how a finger meets a free rod (see `strikeImpulse`).
  *
  * A strike is also the only thing that travels over the network, which is why
  * it is a small plain object: four numbers and an id.
  */
 
-import type { PenLocalPoint } from '../physics/pen';
-import { clampMotion, localToWorld, worldToLocal } from '../physics/pen';
-import type { Pen } from '../physics/pen';
-import { applyImpulseAt } from '../physics/pen';
+import type { Pen, PenLocalPoint } from '../physics/pen';
+import {
+  applyImpulseAt,
+  effectiveMassAt,
+  localToWorld,
+  penAxis,
+  penCentreOfMass,
+  worldToLocal,
+} from '../physics/pen';
+import { resolvePenSpec } from '../physics/pens/catalogue';
 import type { Tuning } from '../physics/tuning';
 import type { Vec2 } from '../physics/vec2';
-import { clamp, cross, normalize, sub, vec } from '../physics/vec2';
+import { clamp, cross, dot, normalize, scale, sub, vec } from '../physics/vec2';
 import type { World } from '../physics/world';
 import { beginTurn, findPen } from '../physics/world';
 
@@ -90,30 +96,55 @@ export function sanitiseStrike(strike: Strike): Strike {
 }
 
 /**
- * Put a strike into the world.
+ * The impulse a strike delivers, and where it lands.
  *
- * The impulse goes in at the contact point, so the lever arm between that
- * point and the pen's centre of mass decides the split between travel and
- * spin. `strikeSpinFactor` trims the rotational half — see `tuning.ts`.
+ * A flick is modelled as a finger moving at a set speed meeting the pen, not
+ * as a fixed shove. The point it lands on is brought up to finger speed, so
+ * the impulse is that speed times the mass the finger meets there — the whole
+ * pen's mass at the centre of mass, about a quarter of it at a tip, where most
+ * of the push turns the pen instead of moving it. That is why a tip flick
+ * wheels away slowly and a centre flick flies straight, with no fudge factor
+ * deciding the split.
+ *
+ * Three limits shape it on top:
+ *
+ *   - `powerCurve`: finger speed rises as power^curve, so small drags are fine
+ *     and only the end of the drag is a big shot.
+ *   - `maxFlickImpulse`: a finger is only so strong. A heavy pen hits the
+ *     ceiling and leaves slower; it hits harder when it arrives.
+ *   - the pen's `axialEfficiency`: a push along the barrel partly slides off
+ *     the rounded end, so end-on flicks lose some of their punch.
  */
+export function strikeImpulse(
+  pen: Pen,
+  strike: Strike,
+  tuning: Tuning,
+): { impulse: Vec2; point: Vec2 } {
+  const clean = sanitiseStrike(strike);
+  const spec = resolvePenSpec(pen.specId);
+  const point = localToWorld(pen, clean.contact);
+  const direction = clean.direction;
+
+  const axis = penAxis(pen);
+  const alongShare = dot(direction, axis);
+  const acrossShare = cross(axis, direction);
+  const efficiency = Math.hypot(spec.axialEfficiency * alongShare, acrossShare);
+
+  const fingerSpeed =
+    tuning.maxFlickSpeed * spec.flickPower * Math.pow(clean.power, tuning.powerCurve);
+  const reached = effectiveMassAt(pen, point, direction) * fingerSpeed;
+  const magnitude = efficiency * Math.min(reached, tuning.maxFlickImpulse);
+
+  return { impulse: scale(direction, magnitude), point };
+}
+
+/** Put a strike into the world. */
 export function applyStrike(world: World, strike: Strike): void {
   const pen = findPen(world, strike.penId);
   if (!pen) return;
 
-  const clean = sanitiseStrike(strike);
-  const impulseMagnitude = clean.power * world.tuning.maxStrikeImpulse;
-  const impulse = vec(
-    clean.direction.x * impulseMagnitude,
-    clean.direction.y * impulseMagnitude,
-  );
-
-  applyImpulseAt(
-    pen,
-    impulse,
-    localToWorld(pen, clean.contact),
-    world.tuning.strikeSpinFactor,
-  );
-  clampMotion(pen, world.tuning);
+  const { impulse, point } = strikeImpulse(pen, strike, world.tuning);
+  applyImpulseAt(pen, impulse, point);
   beginTurn(world);
 }
 
@@ -156,32 +187,35 @@ export interface StrikePreview {
 /**
  * What a strike would do, without doing it.
  *
- * The aim overlay uses this to show the player the trade-off live: pull the
- * grab point towards a tip and watch the spin indicator wind up while the
- * straight-line speed stays the same.
+ * The aim overlay uses this to show the player the trade-off live: slide the
+ * grab point towards a tip and watch the spin indicator wind up while the pen's
+ * travel drops away.
  */
 export function previewStrike(pen: Pen, strike: Strike, tuning: Tuning): StrikePreview {
-  const clean = sanitiseStrike(strike);
-  const magnitude = clean.power * tuning.maxStrikeImpulse;
-  const contactPoint = localToWorld(pen, clean.contact);
-  const impulse = vec(clean.direction.x * magnitude, clean.direction.y * magnitude);
-  const lever = sub(contactPoint, vec(pen.x, pen.y));
+  const { impulse, point } = strikeImpulse(pen, strike, tuning);
+  const spin = spinFrom(pen, impulse, point);
 
-  const spin = clamp(
-    cross(lever, impulse) * pen.invInertia * tuning.strikeSpinFactor,
-    -tuning.maxAngularVelocity,
-    tuning.maxAngularVelocity,
+  // The most spin a full-power flick could produce: square on to either end.
+  const square = vec(-Math.sin(pen.angle), Math.cos(pen.angle));
+  const maxSpin = Math.max(
+    ...[1, -1].map((along) => {
+      const tip = strikeImpulse(
+        pen,
+        { penId: pen.id, contact: { along, across: 0 }, direction: square, power: 1 },
+        tuning,
+      );
+      return Math.abs(spinFrom(pen, tip.impulse, tip.point));
+    }),
   );
 
-  // The most spin a full-power flick could produce: all of it at a tip, square on.
-  const maxLever = pen.length / 2;
-  const maxSpin =
-    tuning.maxStrikeImpulse * maxLever * pen.invInertia * tuning.strikeSpinFactor;
-
   return {
-    speed: magnitude * pen.invMass,
+    speed: Math.hypot(impulse.x, impulse.y) * pen.invMass,
     spin,
     spinShare: maxSpin > 0 ? Math.min(1, Math.abs(spin) / maxSpin) : 0,
-    contactPoint,
+    contactPoint: point,
   };
+}
+
+function spinFrom(pen: Pen, impulse: Vec2, point: Vec2): number {
+  return cross(sub(point, penCentreOfMass(pen)), impulse) * pen.invInertia;
 }
