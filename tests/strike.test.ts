@@ -1,16 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { createPen } from '../src/shared/physics/pen';
+import { createPen, penCentreOfMass, worldToLocal } from '../src/shared/physics/pen';
+import { resolvePenSpec } from '../src/shared/physics/pens/catalogue';
 import { DEFAULT_TUNING } from '../src/shared/physics/tuning';
 import { vec } from '../src/shared/physics/vec2';
 import { createWorld, findPen } from '../src/shared/physics/world';
 import {
+  applyStrike,
   checkStrike,
   previewStrike,
   sanitiseStrike,
   strikeFromDrag,
 } from '../src/shared/game/strike';
 
-const pen = () => createPen({ id: 'p', ownerId: 'me', x: 0, y: 0, angle: 0 }, DEFAULT_TUNING);
+const pen = () => createPen({ id: 'p', ownerId: 'me', x: 0, y: 0, angle: 0 });
+/** The spot on the pen that is its centre of mass, in strike coordinates. */
+const atBalance = () => worldToLocal(pen(), penCentreOfMass(pen()));
 
 describe('strikeFromDrag', () => {
   it('sends the pen away from the direction of the pull', () => {
@@ -39,7 +43,7 @@ describe('strikeFromDrag', () => {
   it('records where along the pen the grab landed', () => {
     const atTip = strikeFromDrag(
       pen(),
-      vec(DEFAULT_TUNING.penLength / 2, 0),
+      vec(resolvePenSpec(undefined).length / 2, 0),
       vec(0.1, 0),
       DEFAULT_TUNING,
     );
@@ -117,10 +121,10 @@ describe('checkStrike', () => {
 });
 
 describe('previewStrike', () => {
-  it('reports no spin for a flick through the centre', () => {
+  it('reports no spin for a flick through the centre of mass', () => {
     const preview = previewStrike(
       pen(),
-      { penId: 'p', contact: { along: 0, across: 0 }, direction: vec(0, 1), power: 1 },
+      { penId: 'p', contact: atBalance(), direction: vec(0, 1), power: 1 },
       DEFAULT_TUNING,
     );
     expect(preview.spinShare).toBeCloseTo(0, 10);
@@ -135,16 +139,15 @@ describe('previewStrike', () => {
     expect(preview.spinShare).toBeGreaterThan(0.9);
   });
 
-  it('agrees with the speed the pen actually leaves at', () => {
-    const body = pen();
-    const preview = previewStrike(
-      body,
-      { penId: 'p', contact: { along: 0, across: 0 }, direction: vec(1, 0), power: 0.5 },
-      DEFAULT_TUNING,
-    );
-    expect(preview.speed).toBeCloseTo(
-      (0.5 * DEFAULT_TUNING.maxStrikeImpulse) / body.mass,
-      10,
-    );
+  it('agrees with what the pen actually does', () => {
+    const strike = { penId: 'p', contact: { along: 0.6, across: 0 }, direction: vec(0.6, 0.8), power: 0.5 };
+    const preview = previewStrike(pen(), strike, DEFAULT_TUNING);
+
+    const world = createWorld([{ id: 'p', ownerId: 'me', x: 0, y: 0, angle: 0 }]);
+    applyStrike(world, strike);
+    const struck = findPen(world, 'p')!;
+
+    expect(preview.speed).toBeCloseTo(Math.hypot(struck.vx, struck.vy), 10);
+    expect(preview.spin).toBeCloseTo(struck.omega, 10);
   });
 });

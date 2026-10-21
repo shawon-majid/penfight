@@ -6,6 +6,7 @@
  */
 
 import type { Pen } from './pen';
+import { penCentreOfMass } from './pen';
 import { vec, type Vec2 } from './vec2';
 
 export interface Table {
@@ -46,11 +47,13 @@ export function tableBounds(table: Table): TableBounds {
  * A pen is falling once its centre of mass passes the edge.
  *
  * Overhanging by a little is fine — it is the balance point that decides,
- * which is what happens on a real table.
+ * which is what happens on a real table. A pen with a heavy cap can hang its
+ * light end a long way over.
  */
 export function isOverEdge(pen: Pen, table: Table): boolean {
   const b = tableBounds(table);
-  return pen.x < b.minX || pen.x > b.maxX || pen.y < b.minY || pen.y > b.maxY;
+  const { x, y } = penCentreOfMass(pen);
+  return x < b.minX || x > b.maxX || y < b.minY || y > b.maxY;
 }
 
 /** How close a point is to the nearest edge. Negative once it is past it. */

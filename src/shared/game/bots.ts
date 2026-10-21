@@ -14,7 +14,7 @@
  * not a cheat.
  */
 
-import { penCentre, type Pen } from '../physics/pen';
+import { penCentre, penCentreOfMass, type Pen } from '../physics/pen';
 import { distanceToEdge } from '../physics/table';
 import type { Vec2 } from '../physics/vec2';
 import { normalize, scale, sub, vec } from '../physics/vec2';
@@ -217,8 +217,9 @@ export function rateStrike(
     }
 
     // Otherwise, credit progress towards (or away from) the edge.
-    const edgeBefore = distanceToEdge(penCentre(penBefore), before.table);
-    const edgeAfter = distanceToEdge(penCentre(penAfter), after.table);
+    // Measured from the balance point, since that is what goes over the edge.
+    const edgeBefore = distanceToEdge(penCentreOfMass(penBefore), before.table);
+    const edgeAfter = distanceToEdge(penCentreOfMass(penAfter), after.table);
     const gained = edgeBefore - edgeAfter;
     score += mine ? -gained * 30 * profile.caution : gained * 20;
   }

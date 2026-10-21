@@ -53,7 +53,8 @@ Object per table.
 ```
 src/
   shared/          runs identically in the browser and on the server
-    physics/       pens, contacts, friction, the solver — no DOM, no network
+    physics/       pens, friction, the engine bridge — no DOM, no network
+      pens/        the pen catalogue: one entry per kind of pen
     game/          rules: turns, elimination, strikes, bots, table codes
     net/            the wire format and snapshots
   client/          browser only
@@ -77,7 +78,8 @@ without touching either.
 
 | You want to… | Go to |
 | --- | --- |
-| Change how the game feels — weight, grip, bounce, shot power | `shared/physics/tuning.ts` |
+| Add a pen, or change one — size, weight, grip, bounce | `shared/physics/pens/catalogue.ts` |
+| Change how the game feels for every pen — shot power, timestep | `shared/physics/tuning.ts` |
 | Resize the table or move the starting positions | `shared/physics/table.ts` |
 | Change the rules — lives, teams, more pens each | `shared/game/match.ts` |
 | Change how a flick becomes an impulse | `shared/game/strike.ts` |
@@ -85,41 +87,55 @@ without touching either.
 | Change how it looks | `client/render/` |
 | Change the gesture | `client/input/aim.ts` |
 
-Every feel-related number lives in `tuning.ts` with a comment explaining what
-it does. Two of them are marked FEEL because they are deliberately not
-physical — see the file.
+Every feel-related number lives in `tuning.ts` (the same for every pen) or in a
+pen's entry in `pens/catalogue.ts` (that pen only), each with a comment
+explaining what it does. All of them are physical quantities in real units.
 
 ## How the physics works
 
-**A pen is a capsule**: a line segment with a rounded cap at each end, with
-mass and a moment of inertia. It has a position, a heading, a velocity and a
-spin rate.
+The rigid-body physics is done by [Planck.js](https://github.com/piqnt/planck.js),
+a JavaScript port of Box2D. The game keeps its own plain pen data as the source
+of truth and hands it to Planck each step (`physics/engine.ts`), so nothing
+outside `physics/` knows Planck exists.
 
-**Striking** applies an impulse at the point you grabbed. The lever arm from
-that point to the pen's centre of mass decides the split between travelling and
-spinning. Nothing special-cases a tip hit; it is the same equation.
+**A pen is a real shape**: a barrel with a pointed or rounded tip and a round or
+flat cap, from its catalogue entry. Its centre of mass can sit off the middle —
+a marker's heavy cap pulls it towards the back — and its moment of inertia is
+worked out from its shape, never typed in.
 
-**Table friction** is applied at eight points along the barrel rather than once
-at the centre. That costs a little more, and it buys the coupling between
-sliding and spinning: the table can only supply so much grip, so a spinning pen
-has less of it left over to stop its travel and slides around 40% further.
-(What it does *not* produce is a curve — a symmetric rod cannot generate a
-sideways friction force. Real pens curve because they are lopsided. That is a
-thing to model later, not to fake.)
+**A flick sets the speed of your finger**, not a fixed shove. The point you
+grab is brought up to finger speed, so the impulse is that speed times the mass
+the finger meets there: the whole pen through its centre of mass, about a
+quarter of it at a tip. A centre flick flies straight; a tip flick wheels away
+slowly. A finger is only so strong, so a heavy pen leaves slower but hits
+harder. A push along the barrel partly slides off the end and loses some punch.
 
-**Contacts** are found by the closest approach between the two pens' core
-segments, then resolved with a normal impulse and a friction impulse at the
-contact point. Because the lever arm to each pen's centre is part of it, a
-clean hit through a pen's middle shoves it flat and a hit near its end spins
-it — again, without a special case.
+**Table friction** is applied at eight points along the barrel, with the
+pen's weight shared towards its centre of mass. That buys three things you can
+see:
+
+- Grip is shared between sliding and spinning, so a spinning pen slides further.
+- A round barrel rolls: friction and drag across it are a fraction of what they
+  are along it, so a side-on flick goes much further than an end-on one.
+- A lopsided pen sliding and spinning is pulled round by its heavy end, so it
+  curves slightly.
+
+A speed-proportional drag on top makes range grow nearly in step with flick
+speed, so a half-power shot is a real shot.
+
+**Contacts** are Planck's: the exact shapes, two contact points where barrels
+meet along their length, a proper solver for a pile of pens, and continuous
+collision so a fast pen can never pass through another. The game decides how
+two pens' bounciness combines (around 0.7, as hard plastic is).
 
 **Falling off** happens when a pen's centre of mass passes the edge. Overhang
 is fine; it is the balance point that decides.
 
-The solver runs at a fixed 60 steps a second, sub-stepped so no pen ever moves
-more than half its own thickness between collision checks. It is deterministic:
-the same starting state and the same shot produce the same result everywhere,
-which is what the networking is built on.
+The game advances at a fixed 60 frames a second, with Planck stepping at
+120 Hz underneath. It is deterministic: every shot starts on a fresh engine
+built from the pens' plain state, so the same starting state and the same shot
+produce the same result in every browser, on the server and in a bot's
+lookahead — which is what the networking is built on.
 
 ## On a phone
 
@@ -259,15 +275,18 @@ actually a game. As tuned, four-player bot matches run about **16 turns** on
 average (8 to 33), four of them being the opening round, and draws — everybody
 falling off together — are rare.
 
-Two relationships hold the tuning together, and the tests enforce them:
+A few relationships hold the tuning together, and the tests enforce them for
+every pen in the catalogue:
 
-- A full-power shot that **misses** carries your own pen off the table.
-- A full-power shot that **connects** carries the other pen about half the
-  table — so you cannot kill from anywhere, and have to work someone towards an
-  edge first.
+- A full-power shot that **misses** carries your own pen off the table from the
+  middle, but not clean across the long side.
+- A **half-power** hit never knocks a pen off from the middle — you have to
+  work someone towards an edge, or land a perfect full-power hit.
+- A struck pen never travels further than the striker would have on its own.
+- Side-on flicks roll further than end-on ones.
 
-Change `maxStrikeImpulse`, `tableFriction` or the table size and those tests
-will tell you what it did to the game.
+Change `maxFlickSpeed`, a pen's grip, or the table size and those tests will
+tell you what it did to the game.
 
 ## Testing
 

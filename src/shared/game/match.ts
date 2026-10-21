@@ -14,6 +14,7 @@
 import { closestPointsBetweenSegments } from '../physics/geometry';
 import type { Pen } from '../physics/pen';
 import { penEndpoints, stopPen } from '../physics/pen';
+import { resolvePenSpec } from '../physics/pens/catalogue';
 import type { Table } from '../physics/table';
 import { DEFAULT_TABLE, startingPoses, tableBounds } from '../physics/table';
 import { DEFAULT_TUNING, type Tuning } from '../physics/tuning';
@@ -51,6 +52,8 @@ export interface Player {
   outOnTurn: number | null;
   /** The one pen they own. */
   penId: string;
+  /** Which pen from the catalogue they are playing with. */
+  penSpecId: string;
 }
 
 export interface Match {
@@ -97,6 +100,8 @@ export interface PlayerSpec {
   isBot?: boolean;
   /** The pen colour this player would like. Honoured unless someone seated earlier has it. */
   colourIndex?: number;
+  /** Catalogue pen to play with. Unknown or missing means the standard pen. */
+  penSpecId?: string;
 }
 
 export function penIdFor(playerId: string): string {
@@ -129,12 +134,14 @@ export function createMatch(
     eliminated: false,
     outOnTurn: null,
     penId: penIdFor(spec.id),
+    penSpecId: resolvePenSpec(spec.penSpecId).id,
   }));
 
   const world = createWorld(
     specs.map((spec, index) => ({
       id: penIdFor(spec.id),
       ownerId: spec.id,
+      specId: players[index].penSpecId,
       x: poses[index].position.x,
       y: poses[index].position.y,
       angle: poses[index].angle,
