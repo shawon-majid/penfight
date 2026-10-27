@@ -18,6 +18,7 @@ import {
   decodeServerMessage,
   encode,
 } from '../../shared/net/protocol';
+import { socket } from './server';
 
 export type ConnectionStatus = 'connecting' | 'open' | 'reconnecting' | 'closed';
 
@@ -69,13 +70,12 @@ export class RoomClient {
   }
 
   private url(): string {
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const params = new URLSearchParams({
       player: this.options.playerId,
       name: this.options.name,
     });
     if (this.options.colourIndex !== null) params.set('colour', String(this.options.colourIndex));
-    return `${protocol}//${location.host}/api/table/${this.options.code}/ws?${params}`;
+    return socket(`/api/table/${this.options.code}/ws?${params}`);
   }
 
   private async connect(): Promise<void> {

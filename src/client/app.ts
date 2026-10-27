@@ -15,6 +15,7 @@ import { Account } from './account/account';
 import { ClackAudio } from './audio/clack';
 import { AimController, type AimSnapshot } from './input/aim';
 import { OnlineSession } from './modes/online';
+import { api } from './net/server';
 import { SoloSession } from './modes/solo';
 import { strikeablePen, type Session } from './modes/session';
 import { IntroTimeline } from './render/intro';
@@ -352,7 +353,7 @@ export class App {
 
 /** Ask the server for a table nobody else is using. */
 async function requestNewTableCode(): Promise<string> {
-  const response = await fetch('/api/table', { method: 'POST' });
+  const response = await fetch(api('/api/table'), { method: 'POST' });
   if (!response.ok) {
     throw new Error('Could not open a table. Try again in a moment.');
   }

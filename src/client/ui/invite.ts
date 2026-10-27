@@ -5,12 +5,14 @@
  * bar alike, so both invite the same way.
  */
 
+import { home } from '../net/server';
+
 export type InviteResult = 'shared' | 'copied' | 'failed';
 
 export const inviteLabel = typeof navigator.share === 'function' ? 'Invite' : 'Copy invite';
 
 export async function shareInvite(code: string): Promise<InviteResult> {
-  const invite = `${location.origin}/?table=${code}`;
+  const invite = `${home()}/?table=${code}`;
 
   if (typeof navigator.share === 'function') {
     try {

@@ -9,6 +9,7 @@
 
 import type { BotDifficulty } from '../../shared/game/bots';
 import type { Account, ProfileSummary, RecentMatch } from '../account/account';
+import { home, SIGN_IN_ON_THIS_PAGE } from '../net/server';
 import { PLAYER_COLOURS } from '../render/theme';
 
 const DIFFICULTIES: BotDifficulty[] = ['easy', 'normal', 'hard'];
@@ -240,6 +241,14 @@ export class ProfilePanel {
 
 /** Google's own wording, so people recognise what the button does. */
 export function googleButton(account: Account, label = 'Sign in with Google'): HTMLButtonElement {
+  // Away from the server's own site (the itch.io build), sign-in cannot work
+  // here, so the button opens the game's home page in a new tab instead.
+  if (!SIGN_IN_ON_THIS_PAGE) {
+    return button(`${label} on ${new URL(home()).host}`, 'google-button', () => {
+      window.open(home(), '_blank', 'noopener');
+    });
+  }
+
   const element = button(label, 'google-button', () => {
     element.disabled = true;
     account.signIn().catch((error: unknown) => {

@@ -13,6 +13,7 @@
 
 import { generateCodeWithCrypto, normaliseCode } from '../shared/game/codes';
 import { TOKEN_SUBPROTOCOL_PREFIX } from '../shared/net/protocol';
+import { allowAnyOrigin, preflight } from './cors';
 import {
   accountPlayerId,
   guestPlayerId,
@@ -30,8 +31,9 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
-    if (url.pathname === '/api/table' && request.method === 'POST') {
-      return createTable(env);
+    if (url.pathname === '/api/table') {
+      if (request.method === 'POST') return allowAnyOrigin(await createTable(env));
+      if (request.method === 'OPTIONS') return preflight();
     }
 
     const socketRoute = url.pathname.match(/^\/api\/table\/([^/]+)\/ws$/);

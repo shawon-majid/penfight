@@ -48,6 +48,19 @@ Deploying needs a Cloudflare account (`npx wrangler login`). The free plan
 covers this comfortably — the game uses Workers and one SQLite-backed Durable
 Object per table.
 
+### itch.io
+
+```bash
+pnpm build:itch   # build into dist-itch/ and zip it as penfight-itch.zip
+```
+
+Upload `penfight-itch.zip` to an itch.io project of kind HTML, ticked "This
+file will be played in the browser". That copy runs on itch's domain and opens
+online tables on penfight.shawonmajid.com (set in `.env.itch`), so the server
+there has to be deployed first. Invite links point at penfight.shawonmajid.com,
+and the sign-in button opens that site in a new tab, because Google sign-in
+does not work inside itch's frame.
+
 ## How the code is laid out
 
 ```
