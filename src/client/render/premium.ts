@@ -240,23 +240,35 @@ export function drawPen(
   // The shadow is cast by a copy drawn far off to the side, with the shadow
   // offset bringing it back. Shadow offsets ignore the transform, so this
   // works however the pen is turned, and needs no `filter` (Safari has none).
+  //
+  // Resting, the shadow is sized off the barrel, not fixed pixels: a pen a few
+  // pixels thick with a shadow seven pixels away reads as hovering. Two passes
+  // — a tight dark contact line hugging the barrel, and a soft ambient pool
+  // just beside it — are what make it look like it is lying on the wood.
   const { a, b } = ctx.getTransform();
   const pixelScale = Math.hypot(a, b);
   const away = 10000;
-  ctx.save();
-  ctx.globalAlpha = alpha * (1 - lift * 0.3);
-  ctx.shadowColor = `rgba(0, 0, 0, ${0.55 - clamp(lift) * 0.3})`;
-  ctx.shadowBlur = (5 + lift * 14) * pixelScale;
-  ctx.shadowOffsetX = (away + 4 + lift * 24) * pixelScale;
-  ctx.shadowOffsetY = (7 + lift * 30) * pixelScale;
-  ctx.translate(x - away, y);
-  ctx.rotate(angle);
-  ctx.scale(size, size);
-  ctx.fillStyle = '#000';
-  ctx.beginPath();
-  ctx.roundRect(x0, -r, length, 2 * r, r);
-  ctx.fill();
-  ctx.restore();
+  const held = clamp(lift);
+  const castShadow = (opacity: number, blur: number, dx: number, dy: number): void => {
+    ctx.save();
+    ctx.globalAlpha = alpha * (1 - lift * 0.3);
+    ctx.shadowColor = `rgba(0, 0, 0, ${opacity})`;
+    ctx.shadowBlur = blur * pixelScale;
+    ctx.shadowOffsetX = (away + dx) * pixelScale;
+    ctx.shadowOffsetY = dy * pixelScale;
+    ctx.translate(x - away, y);
+    ctx.rotate(angle);
+    ctx.scale(size, size);
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.roundRect(x0, -r, length, 2 * r, r);
+    ctx.fill();
+    ctx.restore();
+  };
+  // Ambient pool: spreads and drifts away as the pen is lifted.
+  castShadow(0.32 - held * 0.12, r * 2.2 + lift * 14, r * 0.7 + lift * 24, r * 1.1 + lift * 30);
+  // Contact line: only there while the pen is actually touching the table.
+  if (held < 0.05) castShadow(0.7, r * 0.6, r * 0.2, r * 0.35);
 
   ctx.save();
   ctx.globalAlpha = alpha;
