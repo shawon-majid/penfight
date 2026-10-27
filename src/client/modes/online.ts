@@ -19,12 +19,20 @@ import type { ServerMessage, WaitingPlayer, WinTally } from '../../shared/net/pr
 import { applySnapshot } from '../../shared/net/protocol';
 import { PROTOCOL_VERSION } from '../../shared/net/protocol';
 import { RoomClient, localPlayerId, type ConnectionStatus } from '../net/room-client';
-import { ChangeEmitter, NO_EVENTS, type FrameEvents, type Session } from './session';
+import { isReaction } from '../../shared/game/reactions';
+import {
+  ChangeEmitter,
+  NO_EVENTS,
+  type FrameEvents,
+  type ReactionListener,
+  type Session,
+} from './session';
 
 export interface OnlineOptions {
   code: string;
   name: string;
   colourIndex: number | null;
+  avatar: number;
   /** Null for a guest. */
   accessToken: () => Promise<string | null>;
   /** Whether the player thinks they are signed in, to warn if the server disagrees. */
@@ -50,6 +58,7 @@ export class OnlineSession implements Session {
   lastSkip: { playerId: string; reason: 'timeout' | 'disconnected'; at: number } | null = null;
 
   private readonly emitter = new ChangeEmitter();
+  private readonly reactions = new ChangeEmitter<[string, number]>();
   private readonly client: RoomClient;
   private readonly expectSignedIn: boolean;
   /**
@@ -70,6 +79,7 @@ export class OnlineSession implements Session {
       playerId: this.youAre,
       name: options.name,
       colourIndex: options.colourIndex,
+      avatar: options.avatar,
       accessToken: options.accessToken,
       onMessage: (message) => this.handle(message),
       onStatus: (status) => this.handleStatus(status),
@@ -106,6 +116,16 @@ export class OnlineSession implements Session {
     this.client.send({ type: 'rematch' });
   }
 
+  /** Shown when the table echoes it back, so everyone sees it at the same moment. */
+  react(reaction: number): void {
+    if (!isReaction(reaction)) return;
+    this.client.send({ type: 'react', reaction });
+  }
+
+  onReaction(listener: ReactionListener): () => void {
+    return this.reactions.subscribe(listener);
+  }
+
   onChange(listener: () => void): () => void {
     return this.emitter.subscribe(listener);
   }
@@ -113,6 +133,7 @@ export class OnlineSession implements Session {
   destroy(): void {
     this.client.close();
     this.emitter.clear();
+    this.reactions.clear();
   }
 
   get isHost(): boolean {
@@ -190,6 +211,12 @@ export class OnlineSession implements Session {
         // The next player's clock arrives with the snapshot that follows.
         this.turnDeadline = null;
         break;
+      }
+
+      case 'reaction': {
+        // Nothing about the match changed, so no change event either.
+        if (isReaction(message.reaction)) this.reactions.emit(message.playerId, message.reaction);
+        return;
       }
 
       case 'error': {

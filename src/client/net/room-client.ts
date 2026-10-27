@@ -18,6 +18,7 @@ import {
   decodeServerMessage,
   encode,
 } from '../../shared/net/protocol';
+import { randomId } from '../random-id';
 import { socket } from './server';
 
 export type ConnectionStatus = 'connecting' | 'open' | 'reconnecting' | 'closed';
@@ -29,6 +30,7 @@ export interface RoomClientOptions {
   name: string;
   /** Preferred pen colour, or null to take whatever is free. */
   colourIndex: number | null;
+  avatar: number;
   /**
    * The signed-in player's access token, or null for a guest. Asked for on
    * every connect, so a reconnect an hour later still gets a fresh one.
@@ -75,6 +77,7 @@ export class RoomClient {
       name: this.options.name,
     });
     if (this.options.colourIndex !== null) params.set('colour', String(this.options.colourIndex));
+    params.set('avatar', String(this.options.avatar));
     return socket(`/api/table/${this.options.code}/ws?${params}`);
   }
 
@@ -151,7 +154,7 @@ const PLAYER_ID_KEY = 'penfight.playerId';
 export function localPlayerId(): string {
   const existing = localStorage.getItem(PLAYER_ID_KEY);
   if (existing) return existing;
-  const created = crypto.randomUUID();
+  const created = randomId();
   localStorage.setItem(PLAYER_ID_KEY, created);
   return created;
 }

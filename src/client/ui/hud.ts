@@ -10,8 +10,8 @@ import { currentPlayer, inOpeningRound, playerById, standings } from '../../shar
 import { colourFor, type ViewportInsets } from '../render/theme';
 import type { Session } from '../modes/session';
 import { strikeablePen } from '../modes/session';
+import { avatarSvg } from './glyphs';
 import { inviteButton } from './invite';
-import type { TurnClock } from '../render/renderer';
 
 /** How long "Time's up" stays in the turn banner. */
 const SKIP_NOTE_MS = 2400;
@@ -31,10 +31,6 @@ export class Hud {
   private readonly copyButton = document.createElement('button');
   private readonly turnBanner = document.createElement('div');
   private readonly turnText = document.createElement('span');
-  private readonly turnClock = document.createElement('span');
-  /** The thin bar under the chip of whoever is on, draining with their clock. */
-  private clockBar: HTMLElement | null = null;
-  private shownSeconds: number | null = null;
   /** The skip being announced in the banner, until it times out. */
   private showingSkip: number | null = null;
   private session: Session | null = null;
@@ -95,9 +91,7 @@ export class Hud {
 
     this.turnBanner.className = 'turn-banner';
     this.turnText.className = 'turn-text';
-    this.turnClock.className = 'turn-clock hidden';
-    this.turnClock.setAttribute('role', 'timer');
-    this.turnBanner.append(this.turnText, this.turnClock);
+    this.turnBanner.append(this.turnText);
     top.append(code, this.turnBanner, this.leaveButton);
 
     this.playerPanel.className = 'player-panel';
@@ -174,8 +168,11 @@ export class Hud {
    * Measured from the elements themselves rather than mirrored from the CSS
    * breakpoints — the two could drift apart, and the symptom would be a pen
    * hidden under somebody's name.
+   *
+   * @param belowTable room for something sitting between the table and the
+   *   notes at the bottom — the dock, on a phone held upright.
    */
-  reservedSpace(): ViewportInsets {
+  reservedSpace(belowTable = 0): ViewportInsets {
     const root = this.root.getBoundingClientRect();
     const topBar = this.turnBanner.parentElement!.getBoundingClientRect();
 
@@ -219,7 +216,11 @@ export class Hud {
     // screen rather than the middle of whatever space happens to be left.
     const across = Math.max(this.reserved.left, left);
     const down = Math.max(this.reserved.top, top, bottom);
-    this.reserved = { top: down, right: across, bottom: down, left: across };
+    // Room for the dock is the exception: mirroring it at the top as well
+    // would cost the table twice the space, enough to shrink it badly on a
+    // short phone. The table sits a little high instead.
+    const below = Math.max(this.reserved.bottom, down, bottom + belowTable);
+    this.reserved = { top: down, right: across, bottom: below, left: across };
     return this.reserved;
   }
 
@@ -247,7 +248,6 @@ export class Hud {
   private renderPlayers(match: Match, session: Session): void {
     const { youAre } = session;
     this.playerList.replaceChildren();
-    this.clockBar = null;
     const inPlay = match.phase === 'aiming' || match.phase === 'resolving';
 
     const standing = match.players.filter((player) => !player.eliminated).length;
@@ -273,17 +273,13 @@ export class Hud {
         colourFor(player.colourIndex).body,
         tags.join(' \u00b7 '),
         session.wins[player.id] ?? 0,
+        player.avatar,
       );
+      // Where a reaction is shown for a player whose pen has left the table.
+      item.dataset.playerId = player.id;
       if (player.eliminated) item.classList.add('is-out');
       if (onTurn) item.classList.add('is-turn');
       if (player.id === youAre) item.classList.add('is-you');
-
-      if (onTurn && match.phase === 'aiming') {
-        this.clockBar = document.createElement('span');
-        this.clockBar.className = 'chip-clock';
-        this.clockBar.hidden = true;
-        item.append(this.clockBar);
-      }
       this.playerList.append(item);
     }
 
@@ -297,11 +293,11 @@ export class Hud {
   }
 
   /**
-   * Every frame: the turn clock, and the brief "time's up" note when a turn is
-   * passed over. Cheap when nothing changed — it only touches the page when the
-   * number of seconds does.
+   * Every frame: the brief "time's up" note when a turn is passed over. The
+   * clock itself is the ring round your avatar in the dock, not shown here.
+   * Cheap when nothing changed.
    */
-  tick(clock: TurnClock | null): void {
+  tick(): void {
     const session = this.session;
 
     const skip = session?.lastSkip;
@@ -326,23 +322,6 @@ export class Hud {
       this.renderTurn(session);
     }
 
-    const showClock = clock !== null && this.showingSkip === null;
-    this.turnClock.classList.toggle('hidden', !showClock);
-    if (this.clockBar) this.clockBar.hidden = clock === null;
-    if (!clock) {
-      this.shownSeconds = null;
-      return;
-    }
-
-    const seconds = Math.ceil(clock.secondsLeft);
-    if (seconds !== this.shownSeconds) {
-      this.shownSeconds = seconds;
-      this.turnClock.textContent = `0:${String(seconds).padStart(2, '0')}`;
-      this.turnClock.setAttribute('aria-label', `${seconds} seconds left`);
-      this.turnClock.classList.toggle('is-warning', clock.warning);
-      this.clockBar?.classList.toggle('is-warning', clock.warning);
-    }
-    if (this.clockBar) this.clockBar.style.setProperty('--left', String(clock.fraction));
   }
 
   private renderTurn(session: Session): void {
@@ -538,14 +517,22 @@ export class Hud {
  *
  * @param colour null for someone not yet dealt in — an empty ring.
  * @param wins null to leave the column out.
+ * @param avatarIndex their avatar; without one, the ring shows their initial.
  */
-function playerRow(name: string, colour: string | null, tags: string, wins: number | null): HTMLLIElement {
+function playerRow(
+  name: string,
+  colour: string | null,
+  tags: string,
+  wins: number | null,
+  avatarIndex?: number,
+): HTMLLIElement {
   const item = document.createElement('li');
   item.className = 'player';
 
   const avatar = document.createElement('span');
   avatar.className = 'player-avatar';
-  avatar.textContent = name.trim().charAt(0).toUpperCase() || '?';
+  if (avatarIndex === undefined) avatar.textContent = name.trim().charAt(0).toUpperCase() || '?';
+  else avatar.innerHTML = avatarSvg(avatarIndex);
   if (colour) avatar.style.setProperty('--ring', colour);
 
   const text = document.createElement('span');

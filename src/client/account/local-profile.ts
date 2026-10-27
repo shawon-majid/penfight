@@ -11,10 +11,12 @@
  */
 
 import { PEN_COLOUR_COUNT } from '../../shared/game/match';
+import { AVATAR_COUNT, parseAvatar } from '../../shared/game/reactions';
 import type { MatchRecord } from '../../shared/game/results';
 
 const NAME_KEY = 'penfight.name';
 const SOLO_KEY = 'penfight.soloHistory';
+const AVATAR_KEY = 'penfight.avatar';
 
 /** Enough history for a meaningful record without letting storage grow forever. */
 const SOLO_HISTORY_LIMIT = 200;
@@ -25,6 +27,22 @@ export function loadName(): string {
 
 export function saveName(name: string): void {
   write(NAME_KEY, name);
+}
+
+/**
+ * The avatar shown next to this player's name. Everyone has one from the
+ * start: a first visit is dealt one at random and keeps it until they choose.
+ */
+export function loadAvatar(): number {
+  const saved = parseAvatar(read(AVATAR_KEY));
+  if (saved !== null) return saved;
+  const dealt = Math.floor(Math.random() * AVATAR_COUNT);
+  write(AVATAR_KEY, String(dealt));
+  return dealt;
+}
+
+export function saveAvatar(avatar: number): void {
+  write(AVATAR_KEY, String(avatar));
 }
 
 /** Finished games against the bots, oldest first, in the same shape the database takes. */

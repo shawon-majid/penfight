@@ -22,6 +22,9 @@ export interface FrameEvents {
   turnEnded: boolean;
 }
 
+/** Somebody at the table reacted. `reaction` indexes `REACTIONS` in `ui/glyphs.ts`. */
+export type ReactionListener = (playerId: string, reaction: number) => void;
+
 export const NO_EVENTS: FrameEvents = {
   collisions: [],
   startedFalling: [],
@@ -49,6 +52,10 @@ export interface Session {
   /** Offer the local player's shot. Ignored when it is not their turn. */
   submitStrike(strike: Strike): void;
   requestRematch(): void;
+  /** Offer one of the fixed reactions. Ignored for spectators. */
+  react(reaction: number): void;
+  /** Somebody reacted — the local player included, once the table has passed it on. */
+  onReaction(listener: ReactionListener): () => void;
   /** Called whenever anything the UI cares about changed. */
   onChange(listener: () => void): () => void;
   destroy(): void;
@@ -73,16 +80,16 @@ export function strikeablePen(session: Session): Pen | null {
 }
 
 /** Tiny listener bookkeeping, shared by the session implementations. */
-export class ChangeEmitter {
-  private listeners = new Set<() => void>();
+export class ChangeEmitter<Args extends unknown[] = []> {
+  private listeners = new Set<(...args: Args) => void>();
 
-  subscribe(listener: () => void): () => void {
+  subscribe(listener: (...args: Args) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
 
-  emit(): void {
-    for (const listener of this.listeners) listener();
+  emit(...args: Args): void {
+    for (const listener of this.listeners) listener(...args);
   }
 
   clear(): void {

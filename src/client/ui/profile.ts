@@ -1,8 +1,8 @@
 /**
- * The profile panel: your name, pen colour and record, and signing in or out.
+ * The profile panel: your avatar, name, pen colour and record, and signing in or out.
  *
- * Opens over the lobby. Guests see only an offer to sign in; everything else
- * belongs to an account. Signed in, this is the one place the name is changed.
+ * Opens over the lobby. Guests see their avatar and an offer to sign in;
+ * everything else belongs to an account. Signed in, this is the one place the name is changed.
  * Everything shown here that came from a person (names) is set with
  * `textContent`.
  */
@@ -10,7 +10,8 @@
 import type { BotDifficulty } from '../../shared/game/bots';
 import type { Account, ProfileSummary, RecentMatch } from '../account/account';
 import { home, SIGN_IN_ON_THIS_PAGE } from '../net/server';
-import { PLAYER_COLOURS } from '../render/theme';
+import { PLAYER_COLOURS, colourFor } from '../render/theme';
+import { AVATARS, avatarSvg } from './glyphs';
 
 const DIFFICULTIES: BotDifficulty[] = ['easy', 'normal', 'hard'];
 
@@ -56,8 +57,10 @@ export class ProfilePanel {
       // Signing in or out redraws everything. A colour or name change only
       // needs the swatches, and redrawing the rest would refetch the record
       // and throw away keyboard focus.
-      if (this.account.state.status === this.renderedStatus) this.markColour();
-      else void this.render();
+      if (this.account.state.status === this.renderedStatus) {
+        this.markColour();
+        this.markAvatar();
+      } else void this.render();
     });
   }
 
@@ -73,6 +76,15 @@ export class ProfilePanel {
     document.removeEventListener('keydown', this.onKey);
   }
 
+  private markAvatar(): void {
+    const current = this.account.avatar;
+    const ring = colourFor(this.account.colour ?? 0).body;
+    for (const [index, choice] of this.root.querySelectorAll<HTMLElement>('.avatar-choice').entries()) {
+      choice.setAttribute('aria-checked', String(index === current));
+      choice.style.setProperty('--ring', index === current ? ring : '');
+    }
+  }
+
   private markColour(): void {
     const current = this.account.colour;
     for (const [index, swatch] of this.root.querySelectorAll('.colour-swatch').entries()) {
@@ -86,6 +98,12 @@ export class ProfilePanel {
     this.renderedStatus = state.status;
 
     const accountSection = section('Account');
+    // Anyone can pick an avatar, signed in or not, so it comes first.
+    const avatarSection = section('Avatar');
+    avatarSection.append(
+      paragraph('What everyone at the table sees next to your name.'),
+      this.avatarPicker(),
+    );
 
     if (state.status === 'loading') {
       accountSection.append(paragraph('Signing you in…'));
@@ -101,7 +119,7 @@ export class ProfilePanel {
         ),
         googleButton(this.account),
       );
-      this.body.replaceChildren(accountSection);
+      this.body.replaceChildren(avatarSection, accountSection);
       return;
     }
 
@@ -130,6 +148,7 @@ export class ProfilePanel {
     botsSection.append(paragraph('Loading…'));
     recentSection.append(paragraph('Loading…'));
     this.body.replaceChildren(
+      avatarSection,
       accountSection,
       nameSection,
       colourSection,
@@ -209,6 +228,30 @@ export class ProfilePanel {
     row.append(input, save);
     wrapper.append(row, status);
     return wrapper;
+  }
+
+  private avatarPicker(): HTMLElement {
+    const row = document.createElement('div');
+    row.className = 'avatar-picker';
+    row.setAttribute('role', 'radiogroup');
+    row.setAttribute('aria-label', 'Avatar');
+
+    const current = this.account.avatar;
+    const ring = colourFor(this.account.colour ?? 0).body;
+    for (const [index, avatar] of AVATARS.entries()) {
+      const choice = document.createElement('button');
+      choice.type = 'button';
+      choice.className = 'avatar-choice';
+      choice.innerHTML = avatarSvg(index);
+      choice.setAttribute('role', 'radio');
+      choice.setAttribute('aria-checked', String(index === current));
+      choice.setAttribute('aria-label', avatar.label);
+      choice.title = avatar.label;
+      if (index === current) choice.style.setProperty('--ring', ring);
+      choice.addEventListener('click', () => this.account.setAvatar(index));
+      row.append(choice);
+    }
+    return row;
   }
 
   private colourPicker(): HTMLElement {

@@ -17,9 +17,11 @@ import { toDatabase, type MatchRecord } from '../../shared/game/results';
 import {
   appendSoloRecord,
   clearSoloHistory,
+  loadAvatar,
   loadName,
   loadSoloHistory,
   parseColour,
+  saveAvatar,
   saveName,
 } from './local-profile';
 
@@ -141,6 +143,20 @@ export class Account {
    */
   get colour(): number | null {
     return this.state.status === 'signedIn' ? this.state.profile.penColour : null;
+  }
+
+  /**
+   * The avatar to show next to your name. Kept in this browser for everyone,
+   * signed in or not — it is a matter of taste, not of record.
+   */
+  get avatar(): number {
+    return loadAvatar();
+  }
+
+  setAvatar(avatar: number): void {
+    if (avatar === this.avatar) return;
+    saveAvatar(avatar);
+    this.emit();
   }
 
   async setName(name: string): Promise<void> {

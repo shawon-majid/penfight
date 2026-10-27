@@ -24,17 +24,27 @@ import {
   type MatchRecord,
   type ShotTally,
 } from '../../shared/game/results';
+import { isReaction } from '../../shared/game/reactions';
 import { createRng, seedFromString, type Rng } from '../../shared/game/rng';
 import { DEFAULT_TABLE } from '../../shared/physics/table';
 import { DEFAULT_TUNING } from '../../shared/physics/tuning';
 import type { Strike } from '../../shared/game/strike';
 import type { WinTally } from '../../shared/net/protocol';
-import { ChangeEmitter, NO_EVENTS, type FrameEvents, type Session } from './session';
+import { randomId } from '../random-id';
+import {
+  ChangeEmitter,
+  NO_EVENTS,
+  type FrameEvents,
+  type ReactionListener,
+  type Session,
+} from './session';
 
 /** A beat before a bot shoots, so a human can see whose turn it was. */
 const BOT_THINKING_MS = 750;
 
 const BOT_NAMES = ['Nib', 'Biro', 'Sharpie', 'Quill', 'Marker', 'Fineliner'];
+/** Avatars for the bots, by seat: the nib for Nib, the quill for Quill, and so on. */
+const BOT_AVATARS = [0, 2, 6, 1, 9, 11, 7];
 
 export interface SoloOptions {
   playerName: string;
@@ -42,6 +52,8 @@ export interface SoloOptions {
   difficulty: BotDifficulty;
   /** The pen colour the player picked, if any. The bots take what is left. */
   colourIndex?: number | null;
+  /** The player's avatar. The bots take others. */
+  avatar?: number;
   /** Called once when a match ends, with the whole match. */
   onFinished?: (record: MatchRecord) => void;
   /** Fix the seed to replay an identical match. Defaults to the clock. */
@@ -59,6 +71,7 @@ export class SoloSession implements Session {
   readonly wins: WinTally = {};
 
   private readonly emitter = new ChangeEmitter();
+  private readonly reactions = new ChangeEmitter<[string, number]>();
   private readonly options: SoloOptions;
   private rng: Rng;
   private tally: ShotTally = createTally();
@@ -81,10 +94,18 @@ export class SoloSession implements Session {
         id: YOU,
         name: this.options.playerName || 'You',
         colourIndex: this.options.colourIndex ?? undefined,
+        avatar: this.options.avatar,
       },
     ];
+    // Each bot keeps the same avatar every game, skipping whichever one is yours.
+    const botAvatars = BOT_AVATARS.filter((avatar) => avatar !== this.options.avatar);
     for (let i = 0; i < this.options.botCount; i++) {
-      specs.push({ id: `bot-${i}`, name: BOT_NAMES[i % BOT_NAMES.length], isBot: true });
+      specs.push({
+        id: `bot-${i}`,
+        name: BOT_NAMES[i % BOT_NAMES.length],
+        isBot: true,
+        avatar: botAvatars[i % botAvatars.length],
+      });
     }
     // Drawn from the session's seeded generator, so a fixed seed still
     // replays an identical match, first player included.
@@ -107,7 +128,7 @@ export class SoloSession implements Session {
         if (winnerId) this.wins[winnerId] = (this.wins[winnerId] ?? 0) + 1;
         this.options.onFinished?.(
           buildMatchRecord(this.match, this.tally, {
-            id: crypto.randomUUID(),
+            id: randomId(),
             mode: 'solo',
             difficulty: this.options.difficulty,
             startedAt: this.startedAt,
@@ -138,6 +159,16 @@ export class SoloSession implements Session {
     this.emitter.emit();
   }
 
+  /** Nobody to send it to: it just shows over your pen. */
+  react(reaction: number): void {
+    if (!isReaction(reaction)) return;
+    this.reactions.emit(YOU, reaction);
+  }
+
+  onReaction(listener: ReactionListener): () => void {
+    return this.reactions.subscribe(listener);
+  }
+
   onChange(listener: () => void): () => void {
     return this.emitter.subscribe(listener);
   }
@@ -146,6 +177,7 @@ export class SoloSession implements Session {
     this.destroyed = true;
     this.clearBotTimer();
     this.emitter.clear();
+    this.reactions.clear();
   }
 
   /**

@@ -1017,36 +1017,6 @@ select.text-input {
   white-space: nowrap;
 }
 
-.turn-clock {
-  display: inline-block;
-  margin-left: 10px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(214, 200, 175, 0.35);
-  background: rgba(18, 16, 15, 0.8);
-  font-family: var(--font);
-  font-size: 13px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
-  vertical-align: 2px;
-  text-shadow: none;
-}
-
-.turn-clock.is-warning {
-  color: var(--danger);
-  border-color: rgba(240, 120, 106, 0.7);
-  background: rgba(240, 120, 106, 0.16);
-  animation: clock-pulse 1s ease-in-out infinite;
-}
-
-@keyframes clock-pulse {
-  50% {
-    transform: scale(1.07);
-  }
-}
-
 /* The scoreboard: one glass panel down the side of the table. */
 .player-panel {
   flex: 0 0 auto;
@@ -1169,25 +1139,6 @@ select.text-input {
 
 .player.is-waiting .player-avatar {
   box-shadow: inset 0 0 0 1.5px var(--ink-caption);
-}
-
-/* The turn clock, draining under the row of whoever is on. */
-.chip-clock {
-  position: absolute;
-  left: 48px;
-  right: 10px;
-  bottom: 3px;
-  height: 2px;
-  border-radius: 1px;
-  background: linear-gradient(90deg, var(--accent) 0 calc(var(--left, 1) * 100%), rgba(255, 255, 255, 0.08) 0);
-}
-
-.chip-clock.is-warning {
-  background: linear-gradient(90deg, var(--danger) 0 calc(var(--left, 1) * 100%), rgba(255, 255, 255, 0.08) 0);
-}
-
-.chip-clock[hidden] {
-  display: none;
 }
 
 .player.is-out {
@@ -1508,12 +1459,6 @@ select.text-input {
     font-size: 11px;
   }
 
-  .chip-clock {
-    left: 30px;
-    right: 12px;
-    bottom: 2px;
-  }
-
   .hint,
   .round-note {
     font-size: 12px;
@@ -1622,11 +1567,6 @@ select.text-input {
     display: none;
   }
 
-  .chip-clock {
-    left: 36px;
-    bottom: 1px;
-  }
-
   .overlay-card {
     padding: 18px;
   }
@@ -1637,10 +1577,6 @@ select.text-input {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .turn-clock.is-warning {
-    animation: none;
-  }
-
   .overlay {
     backdrop-filter: none;
   }
@@ -1656,4 +1592,360 @@ select.text-input {
   margin: 6px 0 0;
   font-size: 13px;
   color: var(--ink-dim);
+}
+
+/* -- Your dock and reactions ------------------------------------------------ */
+
+/*
+ * You at the table: avatar with your turn clock round it, your name and what
+ * you are up to, and the reaction button. Over the table, under the display.
+ * A glass card bottom-left on a wide screen, the same glass as the players panel.
+ */
+.player-dock {
+  position: absolute;
+  left: calc(16px + var(--safe-left));
+  bottom: calc(16px + var(--safe-bottom));
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 8px 8px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--glass-shadow);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+
+.player-dock[hidden],
+.reaction-panel[hidden],
+.reaction-bubble[hidden] {
+  display: none;
+}
+
+#game.is-intro .player-dock {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.dock-avatar {
+  position: relative;
+  flex: 0 0 auto;
+  width: 52px;
+  height: 52px;
+}
+
+.dock-avatar > svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.dock-track,
+.dock-clock {
+  fill: none;
+  stroke-width: 3;
+}
+
+.dock-track {
+  stroke: var(--ring);
+  opacity: 0.35;
+}
+
+.dock-clock {
+  stroke: var(--ring);
+  stroke-linecap: round;
+  transition: stroke 0.3s ease;
+}
+
+.player-dock.is-turn .dock-clock {
+  filter: drop-shadow(0 0 4px var(--ring));
+}
+
+.player-dock.is-warning .dock-clock {
+  stroke: var(--danger);
+  filter: drop-shadow(0 0 4px var(--danger));
+}
+
+.dock-face {
+  position: absolute;
+  inset: 6px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(13, 12, 12, 0.9);
+  font-family: var(--serif);
+  font-size: 18px;
+  color: var(--ink-title);
+}
+
+.dock-face svg {
+  width: 26px;
+  height: 26px;
+}
+
+.dock-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  max-width: 140px;
+}
+
+.dock-name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dock-status {
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-caption);
+}
+
+.player-dock.is-turn .dock-status {
+  color: var(--ring);
+}
+
+.player-dock.is-warning .dock-status {
+  color: var(--danger);
+}
+
+.player-dock.is-out .dock-avatar {
+  opacity: 0.45;
+}
+
+/* Champagne, like the main buttons, so it is the thing your eye finds. */
+.reaction-button {
+  position: relative;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  margin-left: 4px;
+  padding: 0;
+  border-radius: 50%;
+  border: 0;
+  background: var(--champagne);
+  box-shadow: 0 8px 22px rgba(205, 184, 148, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: transform 0.15s ease, box-shadow 0.2s ease;
+}
+
+.reaction-button svg {
+  width: 30px;
+  height: 30px;
+}
+
+.reaction-button:active {
+  transform: scale(0.94);
+}
+
+.reaction-button.is-open {
+  box-shadow: 0 0 0 3px rgba(205, 184, 148, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+/*
+ * Until someone has used it once, it pulses gently at the start of each game.
+ * A spreading shadow rather than a growing ring, which would push past the
+ * screen edge on a phone and make the page scroll.
+ */
+.reaction-button.is-calling {
+  animation: reaction-call 1.8s ease-out 1s 4;
+}
+
+@keyframes reaction-call {
+  0% { box-shadow: 0 0 0 0 rgba(205, 184, 148, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.45); }
+  100% { box-shadow: 0 0 0 16px rgba(205, 184, 148, 0), inset 0 1px 0 rgba(255, 255, 255, 0.45); }
+}
+
+.reaction-button:focus-visible,
+.reaction-panel button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* The same glass as the players panel, opening above the dock. */
+.reaction-panel {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 10px);
+  display: grid;
+  grid-template-columns: repeat(4, var(--tap));
+  gap: 6px;
+  padding: 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  box-shadow: var(--glass-shadow);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+
+.reaction-panel button {
+  display: grid;
+  place-items: center;
+  width: var(--tap);
+  height: var(--tap);
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: var(--surface-raised);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.reaction-panel button svg {
+  width: 30px;
+  height: 30px;
+}
+
+@media (hover: hover) {
+  .reaction-button:hover {
+    box-shadow: 0 10px 26px rgba(205, 184, 148, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  }
+
+  .reaction-panel button:hover {
+    border-color: rgba(205, 184, 148, 0.42);
+    background: rgba(205, 184, 148, 0.09);
+  }
+}
+
+/* A phone held upright: a full-width row just under the table, button under the thumb. */
+@media (max-width: 720px) and (orientation: portrait) {
+  .player-dock {
+    /* Read by the script, which keeps room for the dock between table and notes. */
+    --under-table: 1;
+    left: calc(14px + var(--safe-left));
+    right: calc(14px + var(--safe-right));
+    bottom: auto;
+    top: calc(var(--table-bottom, 70dvh) + 12px);
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .dock-text {
+    flex: 1;
+    max-width: none;
+  }
+
+  .reaction-panel {
+    left: auto;
+    right: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reaction-button.is-calling {
+    animation: none;
+  }
+}
+
+/* Positioned by its tail: left/top are the point it hangs over. */
+.reaction-bubble {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin: -64px 0 0 -22px;
+  border-radius: 50%;
+  background: rgba(13, 12, 12, 0.92);
+  box-shadow: 0 0 0 1.5px var(--ring), 0 10px 24px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  animation: reaction-pop 2.8s ease-out both;
+}
+
+.reaction-bubble svg {
+  width: 32px;
+  height: 32px;
+}
+
+.reaction-bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  margin-left: -4.5px;
+  transform: rotate(45deg);
+  background: rgba(13, 12, 12, 0.92);
+  box-shadow: 1.5px 1.5px 0 0 var(--ring);
+}
+
+@keyframes reaction-pop {
+  0% { transform: scale(0.3) translateY(8px); opacity: 0; }
+  9% { transform: scale(1.1); opacity: 1; }
+  16% { transform: scale(1); }
+  75% { transform: translateY(-4px); opacity: 1; }
+  100% { transform: translateY(-14px); opacity: 0; }
+}
+
+@keyframes reaction-fade {
+  0%, 100% { opacity: 0; }
+  8%, 80% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reaction-bubble {
+    animation-name: reaction-fade;
+  }
+}
+
+/* Avatars in the scoreboard rings, and the picker on the profile. */
+.player-avatar svg {
+  width: 22px;
+  height: 22px;
+  display: block;
+}
+
+.avatar-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, var(--tap));
+  gap: 10px;
+}
+
+.avatar-choice {
+  display: grid;
+  place-items: center;
+  width: var(--tap);
+  height: var(--tap);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(13, 12, 12, 0.9);
+  box-shadow: 0 0 0 2px var(--ring, var(--line-strong));
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.avatar-choice svg {
+  width: 28px;
+  height: 28px;
+}
+
+.avatar-choice[aria-checked='true'] {
+  outline: 3px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.avatar-choice:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
 }

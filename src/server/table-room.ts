@@ -36,6 +36,7 @@ import {
   type PlayerSpec,
 } from '../shared/game/match';
 import { buildMatchRecord, createTally, recordEliminations, type ShotTally } from '../shared/game/results';
+import { REACTION_COOLDOWN_MS, isReaction, parseAvatar } from '../shared/game/reactions';
 import { cryptoRandomInt } from '../shared/game/rng';
 import { DEFAULT_TABLE } from '../shared/physics/table';
 import { DEFAULT_TUNING } from '../shared/physics/tuning';
@@ -92,6 +93,8 @@ export class TableRoom implements DurableObject {
   private hostId: string | null = null;
   /** Games won at this table, by player id. Kept across rematches. */
   private wins: WinTally = {};
+  /** When each player last reacted, for the rate limit. Not worth persisting. */
+  private readonly lastReactionAt = new Map<string, number>();
   /** Identifies the current match in saved results, so saving twice is harmless. */
   private matchId: string | null = null;
   /** When the current match was dealt. ms since the epoch. */
@@ -129,12 +132,13 @@ export class TableRoom implements DurableObject {
     const playerId = url.searchParams.get('player');
     const name = (url.searchParams.get('name') ?? '').slice(0, 24) || 'Player';
     const colour = Number.parseInt(url.searchParams.get('colour') ?? '', 10);
+    const avatar = parseAvatar(url.searchParams.get('avatar')) ?? undefined;
     if (!playerId) return new Response('Missing player id.', { status: 400 });
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     server.accept();
-    this.onOpen(server, playerId, name, Number.isNaN(colour) ? undefined : colour);
+    this.onOpen(server, playerId, name, Number.isNaN(colour) ? undefined : colour, avatar);
 
     const protocol = acceptedSubprotocol(request);
     return new Response(null, {
@@ -151,8 +155,9 @@ export class TableRoom implements DurableObject {
     playerId: string,
     name: string,
     colourIndex: number | undefined,
+    avatar: number | undefined,
   ): void {
-    const seat = this.claimSeat(playerId, name, colourIndex);
+    const seat = this.claimSeat(playerId, name, colourIndex, avatar);
     if (seat) {
       seat.sockets.add(socket);
       if (this.match && this.seats.has(playerId)) setConnected(this.match, playerId, true);
@@ -190,10 +195,19 @@ export class TableRoom implements DurableObject {
    * Returning to your own seat is what makes a refresh or a flaky connection
    * survivable: your pen is still there, exactly where you left it.
    */
-  private claimSeat(playerId: string, name: string, colourIndex: number | undefined): Seat | null {
+  private claimSeat(
+    playerId: string,
+    name: string,
+    colourIndex: number | undefined,
+    avatar: number | undefined,
+  ): Seat | null {
     const existing = this.seats.get(playerId);
     if (existing) {
       existing.spec.name = name;
+      existing.spec.avatar = avatar;
+      // Unlike the colour, an avatar changes nothing in play, so it can follow along mid-match.
+      const player = this.match?.players.find((candidate) => candidate.id === playerId);
+      if (player && avatar !== undefined) player.avatar = avatar;
       // The colour is fixed once a match is dealt; before that, follow the player's choice.
       if (!this.match) existing.spec.colourIndex = colourIndex;
       return existing;
@@ -203,13 +217,14 @@ export class TableRoom implements DurableObject {
     if (waiting) {
       waiting.spec.name = name;
       waiting.spec.colourIndex = colourIndex;
+      waiting.spec.avatar = avatar;
       return waiting;
     }
 
     // Seats count everyone dealt in and everyone queued for the next match.
     if (this.seats.size + this.waiting.size >= MAX_PLAYERS) return null;
 
-    const seat: Seat = { spec: { id: playerId, name, colourIndex }, sockets: new Set() };
+    const seat: Seat = { spec: { id: playerId, name, colourIndex, avatar }, sockets: new Set() };
     // Once a match is under way its seats are fixed; latecomers wait for the next.
     if (this.match) this.waiting.set(playerId, seat);
     else this.seats.set(playerId, seat);
@@ -281,7 +296,27 @@ export class TableRoom implements DurableObject {
       case 'strike':
         this.handleStrike(socket, playerId, message.strike);
         return;
+
+      case 'react':
+        this.handleReaction(playerId, message.reaction);
+        return;
     }
+  }
+
+  /**
+   * Pass a reaction round the table. Only people dealt into the match can
+   * react — their pen is what the bubble hangs off — and too many too fast are
+   * dropped quietly rather than answered with an error.
+   */
+  private handleReaction(playerId: string, reaction: unknown): void {
+    if (!isReaction(reaction)) return;
+    if (!this.match?.players.some((player) => player.id === playerId)) return;
+
+    const now = Date.now();
+    if (now - (this.lastReactionAt.get(playerId) ?? 0) < REACTION_COOLDOWN_MS) return;
+    this.lastReactionAt.set(playerId, now);
+
+    this.broadcast({ type: 'reaction', playerId, reaction });
   }
 
   private startMatch(socket: WebSocket, playerId: string): void {

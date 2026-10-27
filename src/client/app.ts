@@ -22,6 +22,7 @@ import { IntroTimeline } from './render/intro';
 import { Renderer, type TurnClock } from './render/renderer';
 import { Hud } from './ui/hud';
 import { Lobby, type LobbyChoice } from './ui/lobby';
+import { PlayerDock, ReactionBubbles } from './ui/reactions';
 import { RoomScreen } from './ui/room';
 
 /**
@@ -50,6 +51,8 @@ export class App {
   private readonly room: RoomScreen;
   private readonly audio = new ClackAudio();
   private readonly account = new Account();
+  private readonly dock: PlayerDock;
+  private readonly bubbles: ReactionBubbles;
 
   /** The match in progress. Public so dev tooling can inspect and drive it. */
   session: Session | null = null;
@@ -92,6 +95,10 @@ export class App {
       onLeave: () => this.leave(),
       onPenLanded: () => this.audio.clack(0.008),
     });
+
+    // Between the canvas and the display, so the display's panels always cover them.
+    this.dock = new PlayerDock(elements.game, elements.hud, (reaction) => this.session?.react(reaction));
+    this.bubbles = new ReactionBubbles(elements.game, elements.hud);
 
     // Browsers need a gesture before they will play sound — and phones may need several.
     this.audio.install();
@@ -136,14 +143,23 @@ export class App {
       },
     });
 
-    this.unsubscribe = this.session.onChange(() => {
+    const offChange = this.session.onChange(() => {
       if (!this.session) return;
       this.hud.update(this.session);
       this.syncRoom();
       this.maybeStartIntro();
+      this.dock.update(this.session);
     });
+    const offReaction = this.session.onReaction((playerId, reaction) => {
+      if (this.session) this.bubbles.show(this.session.match, playerId, reaction);
+    });
+    this.unsubscribe = () => {
+      offChange();
+      offReaction();
+    };
     this.hud.resetLayout();
     this.hud.update(this.session);
+    this.dock.update(this.session);
 
     this.accumulator = 0;
     this.lastFrameTime = null;
@@ -253,6 +269,7 @@ export class App {
         botCount: choice.botCount,
         difficulty: choice.difficulty,
         colourIndex: this.account.colour,
+        avatar: this.account.avatar,
         onFinished: (record) => this.recordSolo(record),
       });
     }
@@ -264,6 +281,7 @@ export class App {
       code,
       name: choice.name,
       colourIndex: this.account.colour,
+      avatar: this.account.avatar,
       accessToken: () => this.account.accessToken(),
       signedIn: this.account.signedIn,
     });
@@ -285,6 +303,8 @@ export class App {
   private teardownSession(): void {
     this.unsubscribe?.();
     this.unsubscribe = null;
+    this.dock.hide();
+    this.bubbles.clear();
     this.room.hide();
     this.holding = false;
     this.intro = null;
@@ -329,7 +349,8 @@ export class App {
     if (steps === MAX_STEPS_PER_FRAME) this.accumulator = 0;
 
     const turnClock = this.turnClock();
-    this.hud.tick(turnClock);
+    this.hud.tick();
+    this.dock.tick(turnClock);
 
     // Read the aim fresh each frame: the drag may have moved since the last event.
     if (this.aim) this.aimSnapshot = this.aim.snapshot();
@@ -341,10 +362,13 @@ export class App {
         aim: this.aimSnapshot,
         youAre: this.session.youAre,
         time: now,
-        insets: this.hud.reservedSpace(),
+        insets: this.hud.reservedSpace(this.dock.spaceBelowTable()),
         intro,
-        turnClock,
       });
+      const viewport = this.renderer.currentViewport();
+      this.bubbles.update(this.session.match, viewport);
+      const table = this.renderer.tableOnScreen(this.session.match);
+      this.dock.setTableBottom(table.top + table.height);
     }
 
     requestAnimationFrame(this.frame);

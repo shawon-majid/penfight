@@ -184,6 +184,8 @@ export type ClientMessage =
   | { type: 'start' }
   | { type: 'strike'; strike: Strike }
   | { type: 'rematch' }
+  /** One of the fixed reactions, by index. Players at the table only, and rate-limited. */
+  | { type: 'react'; reaction: number }
   | { type: 'ping' };
 
 /** Games won at this table so far, by player id. Outlives any one match. */
@@ -232,6 +234,8 @@ export type ServerMessage =
   | { type: 'strike'; playerId: string; strike: Strike; turnNumber: number }
   /** A turn was passed over without a shot. */
   | { type: 'skipped'; playerId: string; reason: 'timeout' | 'disconnected' }
+  /** Somebody reacted. Sent to everyone, the sender included. */
+  | { type: 'reaction'; playerId: string; reaction: number }
   | { type: 'error'; message: string }
   | { type: 'pong' };
 

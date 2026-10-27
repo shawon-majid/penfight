@@ -39,7 +39,7 @@ import {
   makeWoodTexture,
 } from './premium';
 
-/** The turn clock as the display shows it. */
+/** The turn clock, shown as the ring round your avatar in the dock. */
 export interface TurnClock {
   secondsLeft: number;
   /** 1 with the full time left, 0 at the deadline. */
@@ -59,8 +59,6 @@ export interface RenderInput {
   insets?: ViewportInsets;
   /** The opening of the game, while it plays: its timeline and seconds into it. */
   intro?: { timeline: IntroTimeline; t: number } | null;
-  /** Online: how much of the current turn is left. Null where there is no clock. */
-  turnClock?: TurnClock | null;
 }
 
 export class Renderer {
@@ -99,6 +97,11 @@ export class Renderer {
   /** Current metres-to-pixels mapping. The aim controller needs this too. */
   currentViewport(): Viewport {
     return this.viewport;
+  }
+
+  /** Where the table sits on screen, in CSS pixels, for anything laid out around it. */
+  tableOnScreen(match: Match): { left: number; top: number; width: number; height: number } {
+    return this.tableRect(match);
   }
 
   /**
@@ -394,42 +397,8 @@ export class Renderer {
     const centre = toScreen(this.viewport, vec(pen.x, pen.y));
     const { ctx } = this;
 
-    // Online the ring is the clock: it drains as the turn runs out, and goes
-    // red for the last few seconds with the count above the pen.
-    const clock = input.turnClock;
-    if (clock) {
-      const radius = pen.length * 0.72 * this.viewport.scale;
-      const ink = clock.warning ? THEME.danger : colour.accent;
-      const ratio = Math.min(window.devicePixelRatio || 1, 2);
-      ctx.save();
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-      ctx.beginPath();
-      ctx.arc(centre.x, centre.y, radius, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.strokeStyle = ink;
-      ctx.lineCap = 'round';
-      ctx.shadowColor = ink;
-      ctx.shadowBlur = (clock.warning ? 12 : 6) * ratio;
-      ctx.beginPath();
-      ctx.arc(centre.x, centre.y, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * clock.fraction);
-      ctx.stroke();
-      ctx.restore();
-
-      if (clock.warning && clock.secondsLeft > 0) {
-        ctx.save();
-        ctx.font = `500 ${Math.max(14, radius * 0.4)}px ${FONT_SERIF}`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = THEME.danger;
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
-        ctx.shadowBlur = 8 * ratio;
-        ctx.fillText(String(Math.ceil(clock.secondsLeft)), centre.x, centre.y - radius - 14);
-        ctx.restore();
-      }
-      return;
-    }
-
+    // Only a marker, never the clock: the time left lives in one place, the
+    // ring round the avatar in the dock.
     const pulse = 0.75 + 0.25 * Math.sin(time * 3);
     const radius = pen.length * 0.75 * this.viewport.scale * pulse;
 

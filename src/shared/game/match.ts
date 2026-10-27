@@ -54,6 +54,8 @@ export interface Player {
   penId: string;
   /** Which pen from the catalogue they are playing with. */
   penSpecId: string;
+  /** Their avatar, an index into the client's set. Missing for players who never picked one. */
+  avatar?: number;
 }
 
 export interface Match {
@@ -102,6 +104,8 @@ export interface PlayerSpec {
   colourIndex?: number;
   /** Catalogue pen to play with. Unknown or missing means the standard pen. */
   penSpecId?: string;
+  /** Avatar to show next to their name. */
+  avatar?: number;
 }
 
 export function penIdFor(playerId: string): string {
@@ -135,6 +139,7 @@ export function createMatch(
     outOnTurn: null,
     penId: penIdFor(spec.id),
     penSpecId: resolvePenSpec(spec.penSpecId).id,
+    ...(spec.avatar !== undefined ? { avatar: spec.avatar } : {}),
   }));
 
   const world = createWorld(
