@@ -93,8 +93,8 @@ export class App {
       onPenLanded: () => this.audio.clack(0.008),
     });
 
-    // Browsers need a gesture before they will play sound.
-    window.addEventListener('pointerdown', () => this.audio.unlock(), { once: true });
+    // Browsers need a gesture before they will play sound — and phones may need several.
+    this.audio.install();
   }
 
   /** Resolves once the account is known, which is when the boot screen can lift. */
