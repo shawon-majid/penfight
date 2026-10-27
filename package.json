@@ -8,6 +8,7 @@
     "dev": "vite",
     "dev:server": "wrangler dev --port 8787",
     "build": "npm run typecheck && vite build",
+    "build:itch": "npm run typecheck && vite build --mode itch && cd dist-itch && rm -f ../penfight-itch.zip && zip -qr ../penfight-itch.zip .",
     "preview": "vite preview",
     "deploy": "npm run build && wrangler deploy",
     "test": "vitest run",
